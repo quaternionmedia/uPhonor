@@ -1,28 +1,22 @@
 import m from 'mithril'
 import meiosisTracer from 'meiosis-tracer'
 import { meiosisSetup } from 'meiosis-setup'
-
+import uPhonor from './uphonor'
 export interface State {}
 
-export const App = {
-	initial: {},
-	services: [],
-	view: (cell) => m('h1', 'Hello, world!'),
-}
-
 // Initialize Meiosis
-const cells = meiosisSetup<State>({ app: App })
+const cells = meiosisSetup<State>({ app: uPhonor })
 
 m.mount(document.getElementById('app'), {
-	view: () => App.view(cells()),
+	view: () => uPhonor.view(cells()),
 })
 
 cells.map((state) => {
-	//   console.log('cells', state)
+	console.log('cells', state)
 
 	//   Persist state to local storage
 	//   localStorage.setItem('meiosis', JSON.stringify(state))
-	m.redraw()
+	// m.redraw()
 })
 
 // Debug
