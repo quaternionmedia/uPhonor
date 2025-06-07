@@ -1,10 +1,12 @@
-project('uPhonor', 'c',
-  version : '0.1',
+project('uPhonor', 'c', version : '0.1',
   default_options : ['warning_level=3'])
 
-executable('play',
-           'play.c',
-           dependencies : [
-              dependency('libpipewire-0.3'),
-              dependency('sndfile')],
-           install : true)
+# dependencies
+pipewire = dependency('libpipewire-0.3')
+sndfile = dependency('sndfile')
+alsa = dependency('alsa')
+
+
+# exe
+executable('play', 'play.c', dependencies : [pipewire, sndfile, alsa], install : true)
+executable('midi', 'midi.c', dependencies : [pipewire, alsa], install : true)
