@@ -47,7 +47,9 @@ struct data
 };
 
 /* Function declarations */
-void on_process(void *userdata, struct spa_io_position *position);
+void on_process(void *userdata);
+void process_midi(void *userdata, struct spa_io_position *position);
+
 void do_quit(void *userdata, int signal_number);
 
 /* External stream events structure */

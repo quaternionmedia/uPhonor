@@ -1,29 +1,5 @@
 #include "uphonor.h"
-
-static void state_changed(void *userdata, enum pw_filter_state old,
-                          enum pw_filter_state state, const char *error)
-{
-  struct data *data = userdata;
-
-  switch (state)
-  {
-  case PW_FILTER_STATE_STREAMING:
-    /* reset playback position */
-    pw_log_info("start playback");
-    data->clock_id = SPA_ID_INVALID;
-    data->offset = 0;
-    data->position = 0;
-    break;
-  default:
-    break;
-  }
-}
-
-static const struct pw_filter_events filter_events = {
-    PW_VERSION_FILTER_EVENTS,
-    .process = on_process,
-    .state_changed = state_changed,
-};
+#include "process-midi.c"
 
 int main(int argc, char **argv)
 {
@@ -178,7 +154,7 @@ int main(int argc, char **argv)
    */
   data.filter = pw_filter_new_simple(
       pw_main_loop_get_loop(data.loop),
-      "midi-src",
+      "midiphonor",
       pw_properties_new(
           PW_KEY_MEDIA_TYPE, "Midi",
           PW_KEY_MEDIA_CATEGORY, "Playback",
@@ -260,3 +236,18 @@ void do_quit(void *userdata, int signal_number)
   struct data *data = userdata;
   pw_main_loop_quit(data->loop);
 }
+
+/* This is a structure containing function pointers to event
+   handlers. It is a common pattern in PipeWire: when something
+   allows event listeners, a function _add_listener is available
+   that takes a structure of function pointers, one for each
+   event. Those APIs are versioned using the first field which is
+   an integer version number, associated with a constant declared
+   in the header file.
+
+   Not all event listeners need to be implemented; the only
+   required one for a stream or filter is `process`. */
+const struct pw_stream_events stream_events = {
+    PW_VERSION_STREAM_EVENTS,
+    .process = on_process,
+};
