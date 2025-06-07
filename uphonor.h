@@ -9,8 +9,16 @@
 #include <string.h>
 
 #include <pipewire/pipewire.h>
+#include <pipewire/filter.h>
+
+#include <spa/pod/builder.h>
+#include <spa/control/control.h>
 #include <sndfile.h>
 #include <spa/param/audio/format-utils.h>
+
+struct port
+{
+};
 
 /* A common pattern for PipeWire is to provide a user data void
    pointer that can be used to pass data around, so that we have a
@@ -25,6 +33,13 @@ struct data
   struct pw_core *core;
   struct pw_stream *stream;
 
+  struct pw_filter *filter;
+  struct port *midi_in;
+  struct port *midi_out;
+  uint32_t clock_id;
+  int64_t offset;
+  uint64_t position;
+
   /* libsndfile stuff used to read samples from the input audio
      file. */
   SNDFILE *file;
@@ -32,10 +47,10 @@ struct data
 };
 
 /* Function declarations */
-void on_process(void *userdata);
+void on_process(void *userdata, struct spa_io_position *position);
 void do_quit(void *userdata, int signal_number);
 
 /* External stream events structure */
 extern const struct pw_stream_events stream_events;
 
-#endif /* PLAY_H */
+#endif /* UPHONOR_H */

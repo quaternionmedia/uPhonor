@@ -1,5 +1,30 @@
 #include "uphonor.h"
 
+static void state_changed(void *userdata, enum pw_filter_state old,
+                          enum pw_filter_state state, const char *error)
+{
+  struct data *data = userdata;
+
+  switch (state)
+  {
+  case PW_FILTER_STATE_STREAMING:
+    /* reset playback position */
+    pw_log_info("start playback");
+    data->clock_id = SPA_ID_INVALID;
+    data->offset = 0;
+    data->position = 0;
+    break;
+  default:
+    break;
+  }
+}
+
+static const struct pw_filter_events filter_events = {
+    PW_VERSION_FILTER_EVENTS,
+    .process = on_process,
+    .state_changed = state_changed,
+};
+
 int main(int argc, char **argv)
 {
   struct data data = {
@@ -110,9 +135,9 @@ int main(int argc, char **argv)
      the file contains. */
   const struct spa_pod *params[1];
   uint8_t buffer[1024];
-  struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer,
-                                                  sizeof(buffer));
-  params[0] = spa_format_audio_raw_build(&b,
+  struct spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer,
+                                                        sizeof(buffer));
+  params[0] = spa_format_audio_raw_build(&builder,
                                          SPA_PARAM_EnumFormat,
                                          &SPA_AUDIO_INFO_RAW_INIT(
                                                  .format = SPA_AUDIO_FORMAT_F32,
@@ -143,6 +168,72 @@ int main(int argc, char **argv)
                         PW_STREAM_FLAG_RT_PROCESS,
                     params, 1);
 
+  /* Create a simple filter, the simple filter manages the core and remote
+   * objects for you if you don't need to deal with them.
+   *
+   * Pass your events and a user_data pointer as the last arguments. This
+   * will inform you about the filter state. The most important event
+   * you need to listen to is the process event where you need to process
+   * the data.
+   */
+  data.filter = pw_filter_new_simple(
+      pw_main_loop_get_loop(data.loop),
+      "midi-src",
+      pw_properties_new(
+          PW_KEY_MEDIA_TYPE, "Midi",
+          PW_KEY_MEDIA_CATEGORY, "Playback",
+          PW_KEY_MEDIA_CLASS, "Midi/Source",
+          NULL),
+      &filter_events,
+      &data);
+
+  /* Make a midi output port */
+  data.midi_out = pw_filter_add_port(data.filter,
+                                     PW_DIRECTION_OUTPUT,
+                                     PW_FILTER_PORT_FLAG_MAP_BUFFERS,
+                                     sizeof(struct port),
+                                     pw_properties_new(
+                                         PW_KEY_FORMAT_DSP, "8 bit raw midi",
+                                         PW_KEY_PORT_NAME, "output",
+                                         NULL),
+                                     NULL, 0);
+
+  /* Update SPA_PARAM_Buffers to request a specific sizes and counts.
+   * This is not mandatory: if you skip this, you'll get default sized
+   * buffers, usually 4k or 32k bytes or so.
+   *
+   * We'll here ask for 4096 bytes as that's enough.
+   */
+  spa_pod_builder_init(&builder, buffer, sizeof(buffer));
+
+  params[0] = spa_pod_builder_add_object(&builder,
+                                         /* POD Object for the buffer parameter */
+                                         SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
+                                         /* Default 1 buffer, minimum of 1, max of 32 buffers.
+                                          * We can do with 1 buffer as we dequeue and queue in the same
+                                          * cycle.
+                                          */
+                                         SPA_PARAM_BUFFERS_buffers, SPA_POD_CHOICE_RANGE_Int(1, 1, 32),
+                                         /* MIDI buffers always have 1 data block */
+                                         SPA_PARAM_BUFFERS_blocks, SPA_POD_Int(1),
+                                         /* Buffer size: request default 4096 bytes, min 4096, no maximum */
+                                         SPA_PARAM_BUFFERS_size, SPA_POD_CHOICE_RANGE_Int(4096, 4096, INT32_MAX),
+                                         /* MIDI buffers have stride 1 */
+                                         SPA_PARAM_BUFFERS_stride, SPA_POD_Int(1));
+
+  pw_filter_update_params(data.filter, data.midi_out,
+                          (const struct spa_pod **)params, SPA_N_ELEMENTS(params));
+
+  /* Now connect this filter. We ask that our process function is
+   * called in a realtime thread. */
+  if (pw_filter_connect(data.filter,
+                        PW_FILTER_FLAG_RT_PROCESS,
+                        NULL, 0) < 0)
+  {
+    fprintf(stderr, "can't connect\n");
+    return -1;
+  }
+
   /* We start the event loop. Underlying to this is an epoll call
      that listens on an eventfd. In this example, the process
      gets woken up regularly to evaluate the process event
@@ -151,6 +242,7 @@ int main(int argc, char **argv)
 
   /* pw_main_loop_run returns when the event loop has been asked
      to quit, using pw_main_loop_quit. */
+  pw_filter_destroy(data.filter);
   pw_stream_destroy(data.stream);
   spa_hook_remove(&event_listener);
   pw_context_destroy(context);

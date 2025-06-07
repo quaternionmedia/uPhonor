@@ -1,19 +1,5 @@
 #include "uphonor.h"
-
-/* This is a structure containing function pointers to event
-   handlers. It is a common pattern in PipeWire: when something
-   allows event listeners, a function _add_listener is available
-   that takes a structure of function pointers, one for each
-   event. Those APIs are versioned using the first field which is
-   an integer version number, associated with a constant declared
-   in the header file.
-
-   Not all event listeners need to be implemented; the only
-   required one for a stream or filter is `process`. */
-const struct pw_stream_events stream_events = {
-    PW_VERSION_STREAM_EVENTS,
-    .process = on_process,
-};
+#define PERIOD_NSEC (SPA_NSEC_PER_SEC / 8)
 
 /* on_process is responsible for generating the audio samples when
    the stream should be outputting audio. It might not get called,
@@ -30,13 +16,18 @@ const struct pw_stream_events stream_events = {
 
    We'll use the following calling convention: a frame is composed
    of multiple samples, one per channel. */
-void on_process(void *userdata)
+void on_process(void *userdata, struct spa_io_position *position)
 {
   /* Retrieve our global data structure. */
   struct data *data = userdata;
+  struct pw_buffer *b;
+  struct port *midi_output = data->midi_out;
+  struct spa_data *d;
+  struct spa_pod_builder builder;
+  struct spa_pod_frame frame;
+  uint64_t sample_offset, sample_period, sample_position, cycle;
 
   /* Dequeue the buffer which we will fill up with data. */
-  struct pw_buffer *b;
   if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL)
   {
     pw_log_warn("out of buffers: %m");
@@ -109,3 +100,18 @@ error_after_dequeue:
   b->buffer->datas[0].chunk->size = 0;
   pw_stream_queue_buffer(data->stream, b);
 }
+
+/* This is a structure containing function pointers to event
+   handlers. It is a common pattern in PipeWire: when something
+   allows event listeners, a function _add_listener is available
+   that takes a structure of function pointers, one for each
+   event. Those APIs are versioned using the first field which is
+   an integer version number, associated with a constant declared
+   in the header file.
+
+   Not all event listeners need to be implemented; the only
+   required one for a stream or filter is `process`. */
+const struct pw_stream_events stream_events = {
+    PW_VERSION_STREAM_EVENTS,
+    .process = on_process,
+};
