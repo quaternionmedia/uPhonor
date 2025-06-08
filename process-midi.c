@@ -47,7 +47,7 @@ void process_midi(void *userdata, struct spa_io_position *position)
                 pw_log_info("MIDI input received: 0x%08x", *midi_data);
                 // Any MIDI input triggers audio reset
                 data->reset_audio = true;
-                pw_log_info("MIDI input received (0x%08x), resetting audio playback", *midi_data);
+                pw_log_info("MIDI input received (0x%08x)", *midi_data);
                 break;
               }
             }
@@ -60,20 +60,28 @@ void process_midi(void *userdata, struct spa_io_position *position)
             if (SPA_POD_BODY_SIZE(&c->value) >= sizeof(uint8_t))
             {
               uint8_t *midi_data = (uint8_t *)SPA_POD_BODY(&c->value);
-              if (midi_data != NULL)
+              if (midi_data == NULL)
               {
-                pw_log_info("Raw MIDI input received: 0x%02x", *midi_data);
-                // Any MIDI input triggers audio reset
-                data->reset_audio = true;
-                pw_log_info("Raw MIDI input received (0x%02x), resetting audio playback", *midi_data);
-                break;
+                pw_log_trace("process_midi: unknown control type %d at offset %u",
+                             c->type, c->offset);
               }
+              pw_log_trace("Raw MIDI input received: 0x%02x", *midi_data);
+
+              // Check for Note On messages
+              if ((*midi_data & 0xf0) == 0x90)
+              {
+                pw_log_info("Note On message received: 0x%02x", *midi_data);
+                pw_log_info("Resetting audio playback due to Note On message");
+                data->reset_audio = true;
+                data->volume = *midi_data & 0x7f;
+              }
+
+              pw_log_info("Raw MIDI input received (0x%02x), resetting audio playback", *midi_data);
+              break;
             }
           }
           else
           {
-            pw_log_debug("process_midi: unknown control type %d at offset %u",
-                         c->type, c->offset);
           }
         }
       }

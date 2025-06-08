@@ -47,6 +47,8 @@ struct data
 
   /* Flag to reset audio playback on loop sync */
   bool reset_audio;
+  /* Volume level */
+  float volume;
 };
 
 /* Function declarations */

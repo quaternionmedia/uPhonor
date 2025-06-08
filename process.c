@@ -75,6 +75,13 @@ void on_process(void *userdata)
 
     current += ret;
 
+    // Apply volume control to the samples we just read
+    for (sf_count_t i = (current - ret) * data->fileinfo.channels;
+         i < current * data->fileinfo.channels; i++)
+    {
+      buf[i] *= data->volume;
+    }
+
     /* If libsndfile did not manage to fill the buffer we asked
        it to fill, we assume we reached the end of the file
        (as described by libsndfile's documentation) and we
