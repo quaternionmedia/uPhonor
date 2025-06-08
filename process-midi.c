@@ -32,11 +32,11 @@ void process_midi(void *userdata, struct spa_io_position *position)
 
         SPA_POD_SEQUENCE_FOREACH(seq, c)
         {
-          pw_log_debug("process_midi: found control at offset %u, type %d",
+          pw_log_trace("process_midi: found control at offset %u, type %d",
                        c->offset, c->type);
           if (c->type == SPA_CONTROL_UMP)
           {
-            pw_log_debug("process_midi: found UMP control at offset %u",
+            pw_log_trace("process_midi: found UMP control at offset %u",
                          c->offset);
             // Access the MIDI data directly from the control value
             if (SPA_POD_BODY_SIZE(&c->value) >= sizeof(uint32_t))
@@ -44,17 +44,17 @@ void process_midi(void *userdata, struct spa_io_position *position)
               uint32_t *midi_data = (uint32_t *)SPA_POD_BODY(&c->value);
               if (midi_data != NULL)
               {
-                pw_log_info("MIDI input received: 0x%08x", *midi_data);
+                pw_log_debug("MIDI input received: 0x%08x", *midi_data);
                 // Any MIDI input triggers audio reset
                 data->reset_audio = true;
-                pw_log_info("MIDI input received (0x%08x)", *midi_data);
+                pw_log_debug("MIDI input received (0x%08x)", *midi_data);
                 break;
               }
             }
           }
           else if (c->type == SPA_CONTROL_Midi)
           {
-            pw_log_debug("process_midi: found raw MIDI control at offset %u",
+            pw_log_trace("process_midi: found raw MIDI control at offset %u",
                          c->offset);
             // Handle raw MIDI data if needed
             if (SPA_POD_BODY_SIZE(&c->value) >= sizeof(uint8_t))
@@ -64,24 +64,80 @@ void process_midi(void *userdata, struct spa_io_position *position)
               {
                 pw_log_trace("process_midi: unknown control type %d at offset %u",
                              c->type, c->offset);
+                continue;
               }
               pw_log_trace("Raw MIDI input received: 0x%02x", *midi_data);
 
               // Check for Note On messages
+              if ((*midi_data & 0xf0) == 0x80)
+              {
+                pw_log_debug("Note Off message received: 0x%02x", *midi_data);
+              }
               if ((*midi_data & 0xf0) == 0x90)
               {
-                pw_log_info("Note On message received: 0x%02x", *midi_data);
+                pw_log_debug("Note On message received: 0x%02x", *midi_data);
                 pw_log_info("Resetting audio playback due to Note On message");
                 data->reset_audio = true;
-                data->volume = *midi_data & 0x7f;
+                // set the volume from the Note On message velocity
+                uint8_t velocity = *(midi_data + 2);
+                float volume = (float)(velocity & 0x7f) / 127.0f; // Normalize velocity to 0.0-1.0
+                pw_log_info("Setting volume to %.2f from Note On velocity %d",
+                            volume, velocity);
+                data->volume = volume;
               }
-
-              pw_log_info("Raw MIDI input received (0x%02x), resetting audio playback", *midi_data);
-              break;
+              else if ((*midi_data & 0xf0) == 0xA0)
+              {
+                pw_log_debug("Polyphonic Aftertouch message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xB0)
+              {
+                pw_log_debug("Control Change message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xC0)
+              {
+                pw_log_debug("Program Change message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xD0)
+              {
+                pw_log_debug("Channel Pressure message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xE0)
+              {
+                pw_log_debug("Pitch Bend message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xF8)
+              {
+                pw_log_debug("Timing Clock message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xFA)
+              {
+                pw_log_debug("Start message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xFB)
+              {
+                pw_log_debug("Continue message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xFC)
+              {
+                pw_log_debug("Stop message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xFE)
+              {
+                pw_log_debug("Active Sensing message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xFF)
+              {
+                pw_log_debug("System Reset message received: 0x%02x", *midi_data);
+              }
+              else if ((*midi_data & 0xf0) == 0xf0)
+              {
+                pw_log_debug("System Exclusive message received: 0x%02x", *midi_data);
+              }
+              else
+              {
+                pw_log_trace("Unknown MIDI message type: 0x%02x", *midi_data);
+              }
             }
-          }
-          else
-          {
           }
         }
       }

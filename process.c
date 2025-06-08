@@ -1,4 +1,5 @@
 #include "uphonor.h"
+#include "utils.c"
 
 /* on_process is responsible for generating the audio samples when
    the stream should be outputting audio. It might not get called,
@@ -75,11 +76,14 @@ void on_process(void *userdata)
 
     current += ret;
 
+    // float volume = linear_to_db_volume(data->volume);
+    float volume = data->volume;
+
     // Apply volume control to the samples we just read
     for (sf_count_t i = (current - ret) * data->fileinfo.channels;
          i < current * data->fileinfo.channels; i++)
     {
-      buf[i] *= data->volume;
+      buf[i] *= volume;
     }
 
     /* If libsndfile did not manage to fill the buffer we asked

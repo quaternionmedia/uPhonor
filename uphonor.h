@@ -28,32 +28,36 @@ struct port
    struct data is just that. */
 struct data
 {
-  /* Keep some references to PipeWire objects. */
-  struct pw_main_loop *loop;
-  struct pw_core *core;
-  struct pw_stream *stream;
+   /* Keep some references to PipeWire objects. */
+   struct pw_main_loop *loop;
+   struct pw_core *core;
+   struct pw_stream *stream;
 
-  struct pw_filter *filter;
-  struct port *midi_in;
-  struct port *midi_out;
-  uint32_t clock_id;
-  int64_t offset;
-  uint64_t position;
+   struct pw_filter *filter;
+   struct port *midi_in;
+   struct port *midi_out;
+   uint32_t clock_id;
+   int64_t offset;
+   uint64_t position;
 
-  /* libsndfile stuff used to read samples from the input audio
-     file. */
-  SNDFILE *file;
-  SF_INFO fileinfo;
+   /* libsndfile stuff used to read samples from the input audio
+      file. */
+   SNDFILE *file;
+   SF_INFO fileinfo;
 
-  /* Flag to reset audio playback on loop sync */
-  bool reset_audio;
-  /* Volume level */
-  float volume;
+   /* Flag to reset audio playback on loop sync */
+   bool reset_audio;
+   /* Volume level */
+   float volume;
 };
 
 /* Function declarations */
 void on_process(void *userdata);
 void process_midi(void *userdata, struct spa_io_position *position);
+
+/* Utility functions */
+void set_volume(struct data *data, float new_volume);
+float linear_to_db_volume(float linear_volume);
 
 void do_quit(void *userdata, int signal_number);
 
