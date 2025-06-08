@@ -21,6 +21,21 @@ void on_process(void *userdata)
   struct data *data = userdata;
   struct pw_buffer *b;
 
+  // Check if MIDI input requested a reset
+  if (data->reset_audio)
+  {
+    if (sf_seek(data->file, 0, SEEK_SET) < 0)
+    {
+      fprintf(stderr, "file seek error during reset: %s\n",
+              sf_strerror(data->file));
+    }
+    else
+    {
+      pw_log_info("Audio playback reset to beginning");
+    }
+    data->reset_audio = false; // Clear the flag
+  }
+
   /* Dequeue the buffer which we will fill up with data. */
   if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL)
   {

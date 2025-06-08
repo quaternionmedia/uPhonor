@@ -6,19 +6,88 @@ void process_midi(void *userdata, struct spa_io_position *position)
 {
   struct data *data = userdata;
   struct port *midi_output = data->midi_out;
+  struct port *midi_input = data->midi_in;
   struct pw_buffer *buf;
   struct spa_data *d;
   struct spa_pod_builder builder;
   struct spa_pod_frame frame;
   uint64_t sample_offset, sample_period, sample_position, cycle;
+  // Process incoming MIDI data first
+  struct pw_buffer *in_buf;
+  if ((in_buf = pw_filter_dequeue_buffer(midi_input)) != NULL)
+  {
+    struct spa_data *in_d = &in_buf->buffer->datas[0];
 
+    if (in_d->chunk->size > 0)
+    {
+      pw_log_trace("process_midi: received MIDI chunk of size %u",
+                   in_d->chunk->size);
+      // Parse the incoming MIDI data
+      struct spa_pod *pod = spa_pod_from_data(in_d->data, in_d->chunk->size,
+                                              in_d->chunk->offset, in_d->chunk->size);
+      if (pod != NULL && spa_pod_is_sequence(pod))
+      {
+        struct spa_pod_sequence *seq = (struct spa_pod_sequence *)pod;
+        struct spa_pod_control *c;
+
+        SPA_POD_SEQUENCE_FOREACH(seq, c)
+        {
+          pw_log_debug("process_midi: found control at offset %u, type %d",
+                       c->offset, c->type);
+          if (c->type == SPA_CONTROL_UMP)
+          {
+            pw_log_debug("process_midi: found UMP control at offset %u",
+                         c->offset);
+            // Access the MIDI data directly from the control value
+            if (SPA_POD_BODY_SIZE(&c->value) >= sizeof(uint32_t))
+            {
+              uint32_t *midi_data = (uint32_t *)SPA_POD_BODY(&c->value);
+              if (midi_data != NULL)
+              {
+                pw_log_info("MIDI input received: 0x%08x", *midi_data);
+                // Any MIDI input triggers audio reset
+                data->reset_audio = true;
+                pw_log_info("MIDI input received (0x%08x), resetting audio playback", *midi_data);
+                break;
+              }
+            }
+          }
+          else if (c->type == SPA_CONTROL_Midi)
+          {
+            pw_log_debug("process_midi: found raw MIDI control at offset %u",
+                         c->offset);
+            // Handle raw MIDI data if needed
+            if (SPA_POD_BODY_SIZE(&c->value) >= sizeof(uint8_t))
+            {
+              uint8_t *midi_data = (uint8_t *)SPA_POD_BODY(&c->value);
+              if (midi_data != NULL)
+              {
+                pw_log_info("Raw MIDI input received: 0x%02x", *midi_data);
+                // Any MIDI input triggers audio reset
+                data->reset_audio = true;
+                pw_log_info("Raw MIDI input received (0x%02x), resetting audio playback", *midi_data);
+                break;
+              }
+            }
+          }
+          else
+          {
+            pw_log_debug("process_midi: unknown control type %d at offset %u",
+                         c->type, c->offset);
+          }
+        }
+      }
+    }
+    // Queue the input buffer back
+    pw_filter_queue_buffer(midi_input, in_buf);
+  }
   /*
    * Use the clock sample position.
    *
    * If the playback switches to using a different clock, we reset
    * playback as the sample position can then be discontinuous.
    */
-  pw_log_debug("on_process: clock id %u, position %" PRIu64 ", duration %" PRIu64,
+  pw_log_trace("on_process: clock id %u, position %" PRIu64 ", duration %" PRIu64,
                position->clock.id, position->clock.position, position->clock.duration);
   if (data->clock_id != position->clock.id)
   {

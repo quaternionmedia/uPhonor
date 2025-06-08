@@ -173,6 +173,15 @@ int main(int argc, char **argv)
                                          PW_KEY_PORT_NAME, "output",
                                          NULL),
                                      NULL, 0);
+  data.midi_in = pw_filter_add_port(data.filter,
+                                    PW_DIRECTION_INPUT,
+                                    PW_FILTER_PORT_FLAG_MAP_BUFFERS,
+                                    sizeof(struct port),
+                                    pw_properties_new(
+                                        PW_KEY_FORMAT_DSP, "8 bit raw midi",
+                                        PW_KEY_PORT_NAME, "input",
+                                        NULL),
+                                    NULL, 0);
 
   /* Update SPA_PARAM_Buffers to request a specific sizes and counts.
    * This is not mandatory: if you skip this, you'll get default sized

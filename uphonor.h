@@ -44,6 +44,9 @@ struct data
      file. */
   SNDFILE *file;
   SF_INFO fileinfo;
+
+  /* Flag to reset audio playback on loop sync */
+  bool reset_audio;
 };
 
 /* Function declarations */
