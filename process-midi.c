@@ -248,8 +248,8 @@ void process_midi(void *userdata, struct spa_io_position *position)
   pw_filter_queue_buffer(midi_output, buf);
 }
 
-static void state_changed(void *userdata, enum pw_filter_state old,
-                          enum pw_filter_state state, const char *error)
+void state_changed(void *userdata, enum pw_filter_state old,
+                   enum pw_filter_state state, const char *error)
 {
   struct data *data = userdata;
 
@@ -267,8 +267,8 @@ static void state_changed(void *userdata, enum pw_filter_state old,
   }
 }
 
-static const struct pw_filter_events filter_events = {
-    PW_VERSION_FILTER_EVENTS,
-    .process = process_midi,
-    .state_changed = state_changed,
-};
+// const struct pw_filter_events filter_midi_events = {
+//     PW_VERSION_FILTER_EVENTS,
+//     .process = process_midi,
+//     .state_changed = state_changed,
+// };
