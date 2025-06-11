@@ -23,7 +23,7 @@ jobs:
           cd pipewire
           ./autogen.sh --prefix=/usr
           make
-          make install
+          sudo make install
 
       - name: 📦 Setup project
         run: mkdir build && cd build/ && meson setup
