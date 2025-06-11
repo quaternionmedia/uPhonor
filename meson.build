@@ -12,4 +12,4 @@ alsa = dependency('alsa')
 
 # exe
 executable('uphonor', 'uphonor.h', 'main.c', 'process.c', dependencies : [pipewire, sndfile, alsa, math], install : true)
-executable('midi', 'midi.c', dependencies : [pipewire, alsa], install : true)
+# executable('midi', 'midi.c', dependencies : [pipewire, alsa], install : true)
