@@ -31,9 +31,9 @@ struct data
    /* Keep some references to PipeWire objects. */
    struct pw_main_loop *loop;
    struct pw_core *core;
-   struct pw_stream *stream;
 
    struct pw_filter *filter;
+   struct pw_filter_port *audio_out;
    struct port *midi_in;
    struct port *midi_out;
    uint32_t clock_id;
@@ -52,16 +52,17 @@ struct data
 };
 
 /* Function declarations */
-void on_process(void *userdata);
+void on_process(void *userdata, struct spa_io_position *position);
 void process_midi(void *userdata, struct spa_io_position *position);
 
 /* Utility functions */
 void set_volume(struct data *data, float new_volume);
 float linear_to_db_volume(float linear_volume);
 
-void do_quit(void *userdata, int signal_number);
+void state_changed(void *userdata, enum pw_filter_state old,
+                   enum pw_filter_state state, const char *error);
 
 /* External stream events structure */
-extern const struct pw_stream_events stream_events;
+// struct pw_filter_events filter_events;
 
 #endif /* UPHONOR_H */

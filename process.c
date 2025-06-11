@@ -1,26 +1,13 @@
 #include "uphonor.h"
 #include "utils.c"
 
-/* on_process is responsible for generating the audio samples when
-   the stream should be outputting audio. It might not get called,
-   if the ports of the stream are not connected using links to
-   input ports.
-
-   The general process is the following:
-     - pw_stream_dequeue_buffer() to retrieve a buffer from the
-       buffer queue;
-     - fill the buffer with data and set its properties
-       (offset, stride and size);
-     - pw_stream_queue_buffer() to hand the buffer back to
-       PipeWire.
-
-   We'll use the following calling convention: a frame is composed
-   of multiple samples, one per channel. */
-void on_process(void *userdata)
+void on_process(void *userdata, struct spa_io_position *position)
 {
   /* Retrieve our global data structure. */
   struct data *data = userdata;
   struct pw_buffer *b;
+
+  process_midi(userdata, position);
 
   // Check if MIDI input requested a reset
   if (data->reset_audio)
@@ -38,7 +25,7 @@ void on_process(void *userdata)
   }
 
   /* Dequeue the buffer which we will fill up with data. */
-  if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL)
+  if ((b = pw_filter_dequeue_buffer(data->audio_out)) == NULL)
   {
     pw_log_warn("out of buffers: %m");
     return;
@@ -104,7 +91,7 @@ void on_process(void *userdata)
   b->buffer->datas[0].chunk->offset = 0;
   b->buffer->datas[0].chunk->stride = stride;
   b->buffer->datas[0].chunk->size = n_frames * stride;
-  pw_stream_queue_buffer(data->stream, b);
+  pw_filter_queue_buffer(data->audio_out, b);
 
   return;
 
@@ -118,5 +105,5 @@ error_after_dequeue:
   b->buffer->datas[0].chunk->offset = 0;
   b->buffer->datas[0].chunk->stride = 0;
   b->buffer->datas[0].chunk->size = 0;
-  pw_stream_queue_buffer(data->stream, b);
+  pw_filter_queue_buffer(data->audio_out, b);
 }
