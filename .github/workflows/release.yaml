@@ -14,8 +14,16 @@ jobs:
       - name: 📰 Checkout
         uses: actions/checkout@v4
 
-      - name: 📲 Install compiler
-        run: sudo apt-get install -y build-essential meson libpipewire-0.3-dev libsndfile-dev libasound2-dev pipewire
+      - name: 📲 Install dependencies
+        run: sudo apt-get install -y build-essential meson libsndfile-dev libasound2-dev
+
+      - name: 🚰 Install pipewire
+        run: |
+          git clone https://gitlab.freedesktop.org/pipewire/pipewire.git
+          cd pipewire
+          ./autogen.sh --prefix=/usr
+          make
+          make install
 
       - name: 📦 Setup project
         run: mkdir build && cd build/ && meson setup
