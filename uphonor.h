@@ -32,10 +32,12 @@ struct data
    struct pw_main_loop *loop;
    struct pw_core *core;
 
+   struct pw_stream *stream;
+
    struct pw_filter *filter;
    struct pw_filter_port *audio_out;
-   struct port *midi_in;
-   struct port *midi_out;
+   struct pw_filter_port *midi_in;
+   struct pw_filter_port *midi_out;
    uint32_t clock_id;
    int64_t offset;
    uint64_t position;
@@ -54,6 +56,8 @@ struct data
 /* Function declarations */
 void on_process(void *userdata, struct spa_io_position *position);
 void process_midi(void *userdata, struct spa_io_position *position);
+void simple_process(void *userdata, struct spa_io_position *position);
+void stream_process(void *userdata);
 
 /* Utility functions */
 void set_volume(struct data *data, float new_volume);
