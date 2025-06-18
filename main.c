@@ -4,9 +4,10 @@
 
 struct pw_filter_events filter_events = {
     PW_VERSION_FILTER_EVENTS,
-    //  .state_changed = state_changed,
-    .process = on_process,
-};
+    .state_changed = state_changed,
+    //  .process = on_process,
+    .process = play_file};
+
 int main(int argc, char *argv[])
 {
    struct data data = {
@@ -107,7 +108,8 @@ int main(int argc, char *argv[])
 
    if (pw_filter_connect(data.filter,
                          PW_FILTER_FLAG_RT_PROCESS,
-                         params, 1) < 0)
+                         params,
+                         1) < 0)
    {
       fprintf(stderr, "can't connect\n");
       return -1;
@@ -118,29 +120,31 @@ int main(int argc, char *argv[])
    pw_filter_destroy(data.filter);
    pw_main_loop_destroy(data.loop);
    pw_deinit();
-   // sf_close(data.file);
+   sf_close(data.file);
 
    return 0;
 }
 
-// void state_changed(void *userdata, enum pw_filter_state old,
-//                    enum pw_filter_state state, const char *error)
-// {
-//    struct data *data = userdata;
+void state_changed(void *userdata, enum pw_filter_state old,
+                   enum pw_filter_state state, const char *error)
+{
+   struct data *data = userdata;
 
-//    switch (state)
-//    {
-//    case PW_FILTER_STATE_STREAMING:
-//       /* reset playback position */
-//       pw_log_info("start playback");
-//       data->clock_id = SPA_ID_INVALID;
-//       data->offset = 0;
-//       data->position = 0;
-//       break;
-//    default:
-//       break;
-//    }
-// }
+   switch (state)
+   {
+   case PW_FILTER_STATE_STREAMING:
+      /* reset playback position */
+      pw_log_info("start playback");
+      data->clock_id = SPA_ID_INVALID;
+      data->offset = 0;
+      data->position = 0;
+      break;
+   default:
+      pw_log_info("filter state changed from %d to %d: %s",
+                  old, state, error ? error : "no error");
+      break;
+   }
+}
 
 /* do_quit gets called on SIGINT and SIGTERM, upon which we ask the
    event loop to quit. */
