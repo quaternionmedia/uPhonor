@@ -13,6 +13,7 @@
 
 #include <spa/pod/builder.h>
 #include <spa/control/control.h>
+#include <spa/param/latency-utils.h>
 #include <sndfile.h>
 #include <spa/param/audio/format-utils.h>
 
@@ -35,6 +36,7 @@ struct data
    struct pw_stream *stream;
 
    struct pw_filter *filter;
+   struct pw_filter_port *audio_in;
    struct pw_filter_port *audio_out;
    struct pw_filter_port *midi_in;
    struct pw_filter_port *midi_out;
@@ -66,7 +68,13 @@ float linear_to_db_volume(float linear_volume);
 void state_changed(void *userdata, enum pw_filter_state old,
                    enum pw_filter_state state, const char *error);
 
+// Command line interface function to parse arguments
+int cli(int argc, char **argv, struct data *data);
+
 /* External stream events structure */
-// struct pw_filter_events filter_events;
+void state_changed(void *userdata, enum pw_filter_state old,
+                   enum pw_filter_state state, const char *error);
+
+void do_quit(void *userdata, int signal_number);
 
 #endif /* UPHONOR_H */
