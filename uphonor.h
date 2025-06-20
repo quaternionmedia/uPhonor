@@ -14,11 +14,13 @@
 #include <spa/pod/builder.h>
 #include <spa/control/control.h>
 #include <spa/param/latency-utils.h>
+#include <spa/param/format.h>
 #include <sndfile.h>
 #include <spa/param/audio/format-utils.h>
 
 struct port
 {
+   double accumulator;
 };
 
 /* A common pattern for PipeWire is to provide a user data void
@@ -40,6 +42,7 @@ struct data
    struct pw_filter_port *audio_out;
    struct pw_filter_port *midi_in;
    struct pw_filter_port *midi_out;
+   struct spa_audio_info format;
    uint32_t clock_id;
    int64_t offset;
    uint64_t position;

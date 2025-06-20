@@ -1,12 +1,17 @@
 #include "uphonor.h"
 #include "cli.c"
 #include "process.c"
+#include "pipe.c"
 
 struct pw_filter_events filter_events = {
     PW_VERSION_FILTER_EVENTS,
     .state_changed = state_changed,
+    .param_changed = on_param_changed,
+
     //  .process = on_process,
-    .process = play_file};
+    .process = play_file
+    //  .process = tone,
+};
 
 int main(int argc, char *argv[])
 {
@@ -31,14 +36,36 @@ int main(int argc, char *argv[])
 
    /* Create the event loop. */
    data.loop = pw_main_loop_new(NULL);
+   struct pw_context *context = pw_context_new(
+       pw_main_loop_get_loop(data.loop),
+       pw_properties_new(
+           /* Explicity ask for the realtime configuration. */
+           PW_KEY_CONFIG_NAME, "client-rt.conf",
+           NULL),
+       0);
+   if (context == NULL)
+   {
+      perror("pw_context_new() failed");
+      return 1;
+   }
 
+   /* Connect the context, which returns us a proxy to the core
+      object. */
+   data.core = pw_context_connect(context, NULL, 0);
+   if (data.core == NULL)
+   {
+      perror("pw_context_connect() failed");
+      return 1;
+   }
    /* Add signal listeners to cleanly close the event loop and
       process when requested. */
    pw_loop_add_signal(pw_main_loop_get_loop(data.loop), SIGINT,
                       do_quit, &data);
    pw_loop_add_signal(pw_main_loop_get_loop(data.loop), SIGTERM,
                       do_quit, &data);
-
+   char rate_str[64];
+   snprintf(rate_str, sizeof(rate_str), "1/%u",
+            data.fileinfo.samplerate);
    /* Create a single filter that handles both audio and MIDI */
    data.filter = pw_filter_new_simple(
        pw_main_loop_get_loop(data.loop),
@@ -48,14 +75,16 @@ int main(int argc, char *argv[])
            PW_KEY_MEDIA_TYPE, "Audio",
            PW_KEY_MEDIA_CATEGORY, "Duplex",
            PW_KEY_MEDIA_CLASS, "Audio/Duplex",
-           PW_KEY_MEDIA_ROLE, "Music",
+           PW_KEY_MEDIA_ROLE, "DSP",
            PW_KEY_NODE_NAME, "uPhonor",
            //   PW_KEY_NODE_LATENCY, "1024/48000",
            //   PW_KEY_NODE_FORCE_QUANTUM, "1024",
            //   PW_KEY_NODE_RATE, "1/44100",
+           //   PW_KEY_NODE_RATE, rate_str,
            //   PW_KEY_NODE_FORCE_RATE, "true",
            PW_KEY_NODE_NICK, "uPhonor",
            PW_KEY_NODE_DESCRIPTION, "Micro-phonor Loop manager",
+           //   PW_KEY_NODE_AUTOCONNECT, "true",
            NULL),
        &filter_events,
        &data);
@@ -68,6 +97,8 @@ int main(int argc, char *argv[])
                                        pw_properties_new(
                                            PW_KEY_FORMAT_DSP, "32 bit float mono audio",
                                            PW_KEY_PORT_NAME, "audio_output",
+                                           //  PW_KEY_AUDIO_CHANNELS, "1",
+                                           //  PW_KEY_NODE_CHANNELNAMES, "left",
                                            NULL),
                                        NULL, 0);
    data.audio_in = pw_filter_add_port(data.filter,
