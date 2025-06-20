@@ -247,28 +247,3 @@ void process_midi(void *userdata, struct spa_io_position *position)
 
   pw_filter_queue_buffer(midi_output, buf);
 }
-
-void state_changed(void *userdata, enum pw_filter_state old,
-                   enum pw_filter_state state, const char *error)
-{
-  struct data *data = userdata;
-
-  switch (state)
-  {
-  case PW_FILTER_STATE_STREAMING:
-    /* reset playback position */
-    pw_log_info("start playback");
-    data->clock_id = SPA_ID_INVALID;
-    data->offset = 0;
-    data->position = 0;
-    break;
-  default:
-    break;
-  }
-}
-
-// const struct pw_filter_events filter_midi_events = {
-//     PW_VERSION_FILTER_EVENTS,
-//     .process = process_midi,
-//     .state_changed = state_changed,
-// };

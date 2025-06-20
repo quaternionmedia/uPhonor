@@ -6,6 +6,7 @@
 #define DEFAULT_FREQ 440
 #define DEFAULT_VOLUME 0.7
 
+/* Play a simple tone */
 static void tone(void *userdata, struct spa_io_position *position)
 {
   struct data *data = userdata;

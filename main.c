@@ -1,7 +1,7 @@
 #include "uphonor.h"
 #include "cli.c"
-#include "process.c"
 #include "pipe.c"
+#include "process.c"
 
 struct pw_filter_events filter_events = {
     PW_VERSION_FILTER_EVENTS,
@@ -39,8 +39,7 @@ int main(int argc, char *argv[])
    struct pw_context *context = pw_context_new(
        pw_main_loop_get_loop(data.loop),
        pw_properties_new(
-           /* Explicity ask for the realtime configuration. */
-           PW_KEY_CONFIG_NAME, "client-rt.conf",
+           PW_KEY_CONFIG_NAME, "client.conf",
            NULL),
        0);
    if (context == NULL)
