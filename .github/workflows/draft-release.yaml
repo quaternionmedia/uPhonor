@@ -11,4 +11,4 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 📦 Create release from milestone
-        uses: quaternionmedia/milestones@v1
+        uses: quaternionmedia/milestones@v1.0.0
