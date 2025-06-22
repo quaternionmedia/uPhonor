@@ -118,7 +118,7 @@ int main(int argc, char **argv)
       pw_main_loop_get_loop(data.loop),
       pw_properties_new(
           /* Explicity ask for the realtime configuration. */
-          PW_KEY_CONFIG_NAME, "client-rt.conf",
+          PW_KEY_CONFIG_NAME, "client.conf",
           NULL),
       0);
   if (context == NULL)
