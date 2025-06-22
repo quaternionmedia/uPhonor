@@ -1,122 +1,110 @@
 #include "uphonor.h"
-#include "utils.c"
+#include "process-midi.c"
 
-/* on_process is responsible for generating the audio samples when
-   the stream should be outputting audio. It might not get called,
-   if the ports of the stream are not connected using links to
-   input ports.
-
-   The general process is the following:
-     - pw_stream_dequeue_buffer() to retrieve a buffer from the
-       buffer queue;
-     - fill the buffer with data and set its properties
-       (offset, stride and size);
-     - pw_stream_queue_buffer() to hand the buffer back to
-       PipeWire.
-
-   We'll use the following calling convention: a frame is composed
-   of multiple samples, one per channel. */
-void on_process(void *userdata)
+/* Simple in->out passthrough */
+void on_process(void *userdata, struct spa_io_position *position)
 {
-  /* Retrieve our global data structure. */
+  struct data *data = userdata;
+  float *in, *out;
+  uint32_t n_samples = position->clock.duration;
+
+  pw_log_trace("do process %d", n_samples);
+
+  in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
+  out = pw_filter_get_dsp_buffer(data->audio_out, n_samples);
+
+  if (in == NULL || out == NULL)
+    return;
+
+  memcpy(out, in, n_samples * sizeof(float));
+}
+
+/* Play a file */
+void play_file(void *userdata, struct spa_io_position *position)
+{
   struct data *data = userdata;
   struct pw_buffer *b;
+  uint32_t n_samples = position->clock.duration;
 
-  // Check if MIDI input requested a reset
-  if (data->reset_audio)
-  {
-    if (sf_seek(data->file, 0, SEEK_SET) < 0)
-    {
-      fprintf(stderr, "file seek error during reset: %s\n",
-              sf_strerror(data->file));
-    }
-    else
-    {
-      pw_log_info("Audio playback reset to beginning");
-    }
-    data->reset_audio = false; // Clear the flag
-  }
+  float *in, *out;
 
-  /* Dequeue the buffer which we will fill up with data. */
-  if ((b = pw_stream_dequeue_buffer(data->stream)) == NULL)
+  pw_log_trace("play file %d", n_samples);
+
+  process_midi(userdata, position);
+
+  // in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
+  // out = pw_filter_get_dsp_buffer(data->audio_out, n_samples);
+
+  // if (in == NULL)
+  //   return;
+
+  // memcpy(out, in, n_samples * sizeof(float));
+
+  if ((b = pw_filter_dequeue_buffer(data->audio_out)) == NULL)
   {
-    pw_log_warn("out of buffers: %m");
+    pw_log_warn("out of buffers");
     return;
   }
 
-  /* Retrieve buf, a pointer to the actual memory address at
-     which we'll put our samples. */
   float *buf = b->buffer->datas[0].data;
   if (buf == NULL)
-    return;
-
-  /* stride is the size of one frame. */
-  uint32_t stride = sizeof(float) * data->fileinfo.channels;
-  /* n_frames is the number of frames we will output. We decide
-     to output the maximum we can fit in the buffer we were
-     given, or the requested amount if one was given. */
-  uint32_t n_frames = b->buffer->datas[0].maxsize / stride;
-  if (b->requested)
-    n_frames = SPA_MIN(n_frames, b->requested);
-
-  /* We can now fill the buffer! We keep reading from libsndfile
-     until the buffer is full. */
-  sf_count_t current = 0;
-  while (current < n_frames)
   {
-    sf_count_t ret = sf_readf_float(data->file,
-                                    &buf[current * data->fileinfo.channels],
-                                    n_frames - current);
-    if (ret < 0)
-    {
-      fprintf(stderr, "file reading error: %s\n",
-              sf_strerror(data->file));
-      goto error_after_dequeue;
-    }
-
-    current += ret;
-
-    // float volume = linear_to_db_volume(data->volume);
-    float volume = data->volume;
-
-    // Apply volume control to the samples we just read
-    for (sf_count_t i = (current - ret) * data->fileinfo.channels;
-         i < current * data->fileinfo.channels; i++)
-    {
-      buf[i] *= volume;
-    }
-
-    /* If libsndfile did not manage to fill the buffer we asked
-       it to fill, we assume we reached the end of the file
-       (as described by libsndfile's documentation) and we
-       seek back to the start. */
-    if (current != n_frames &&
-        sf_seek(data->file, 0, SEEK_SET) < 0)
-    {
-      fprintf(stderr, "file seek error: %s\n",
-              sf_strerror(data->file));
-      goto error_after_dequeue;
-    }
+    pw_log_warn("buffer data is NULL");
+    pw_filter_queue_buffer(data->audio_out, b);
+    return;
   }
 
-  /* We describe the buffer we just filled before handing it back
-     to PipeWire.  */
+  uint32_t stride = sizeof(float);
+  pw_log_info("File info: channels=%d, samplerate=%d",
+              data->fileinfo.channels, data->fileinfo.samplerate);
+  pw_log_info("Buffer: maxsize=%d, stride=%d, calculated n_samples=%d",
+              b->buffer->datas[0].maxsize, stride, n_samples);
+  if (b->requested)
+  {
+    n_samples = SPA_MIN(n_samples, b->requested);
+    pw_log_info("Adjusted n_samples to %d based on requested=%d", n_samples, b->requested);
+  }
+
+  // Temporary buffer for multi-channel data
+  float *temp_buf = malloc(n_samples * data->fileinfo.channels * sizeof(float));
+  if (!temp_buf)
+  {
+    pw_log_error("Failed to allocate temporary buffer");
+    pw_filter_queue_buffer(data->audio_out, b);
+    return;
+  }
+
+  if (data->reset_audio)
+  {
+    pw_log_info("Resetting audio playback position");
+    sf_seek(data->file, 0, SEEK_SET);
+    data->reset_audio = false;
+  }
+
+  sf_count_t frames_read = sf_readf_float(data->file, temp_buf, n_samples);
+  pw_log_debug("read %d frames from file", frames_read);
+
+  if (frames_read < n_samples)
+  {
+    pw_log_debug("not enough frames read, seeking to start and reading again");
+    sf_seek(data->file, 0, SEEK_SET);
+    sf_count_t additional = sf_readf_float(data->file,
+                                           &temp_buf[frames_read * data->fileinfo.channels],
+                                           n_samples - frames_read);
+    frames_read += additional;
+  }
+
+  // Extract only the first channel
+  for (uint32_t i = 0; i < frames_read; i++)
+  {
+    buf[i] = temp_buf[i * data->fileinfo.channels] * data->volume;
+  }
+
+  free(temp_buf);
+
   b->buffer->datas[0].chunk->offset = 0;
   b->buffer->datas[0].chunk->stride = stride;
-  b->buffer->datas[0].chunk->size = n_frames * stride;
-  pw_stream_queue_buffer(data->stream, b);
+  b->buffer->datas[0].chunk->size = frames_read * stride;
 
-  return;
-
-error_after_dequeue:
-  /* If an error occured after dequeuing a buffer, we end the
-     event loop. The current buffer will be sent to the next
-     node so we need to make it empty to avoid sending corrupted
-     data. */
-
-  pw_main_loop_quit(data->loop);
-  b->buffer->datas[0].chunk->offset = 0;
-  b->buffer->datas[0].chunk->stride = 0;
-  b->buffer->datas[0].chunk->size = 0;
-  pw_stream_queue_buffer(data->stream, b);
+  pw_filter_queue_buffer(data->audio_out, b);
 }
