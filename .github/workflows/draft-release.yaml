@@ -1,0 +1,14 @@
+name: 📝 Draft Release
+on:
+  milestone:
+    types: [closed]
+jobs:
+  release:
+    name: ✏️ Create draft release
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📰 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📦 Create release from milestone
+        uses: quaternionmedia/milestones@v1
