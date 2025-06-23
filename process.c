@@ -1,5 +1,6 @@
 #include "uphonor.h"
 #include "process-midi.c"
+#include "record.c"
 
 /* Simple in->out passthrough */
 void on_process(void *userdata, struct spa_io_position *position)
@@ -32,14 +33,23 @@ void play_file(void *userdata, struct spa_io_position *position)
 
   process_midi(userdata, position);
 
-  // in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
-  // out = pw_filter_get_dsp_buffer(data->audio_out, n_samples);
+  // Handle audio input recording
+  if (data->recording_enabled && data->record_file)
+  {
+    in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
+    if (in != NULL)
+    {
+      // Write audio input to recording file
+      sf_count_t frames_written = sf_writef_float(data->record_file, in, n_samples);
+      if (frames_written != n_samples)
+      {
+        pw_log_warn("Could not write all frames to recording file: wrote %d of %d",
+                    frames_written, n_samples);
+      }
+    }
+  }
 
-  // if (in == NULL)
-  //   return;
-
-  // memcpy(out, in, n_samples * sizeof(float));
-
+  // Handle audio output
   if ((b = pw_filter_dequeue_buffer(data->audio_out)) == NULL)
   {
     pw_log_warn("out of buffers");

@@ -18,6 +18,12 @@ int main(int argc, char *argv[])
    struct data data = {
        0,
    };
+
+   // Initialize recording fields
+   data.recording_enabled = false;
+   data.record_file = NULL;
+   data.record_filename = NULL;
+
    /* Set up buffer parameters for audio */
    const struct spa_pod *params[1];
    uint8_t buffer[1024];
@@ -151,6 +157,12 @@ int main(int argc, char *argv[])
    pw_main_loop_destroy(data.loop);
    pw_deinit();
    sf_close(data.file);
+
+   // Clean up recording resources
+   if (data.recording_enabled)
+   {
+      stop_recording(&data);
+   }
 
    return 0;
 }

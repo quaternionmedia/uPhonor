@@ -52,6 +52,12 @@ struct data
    SNDFILE *file;
    SF_INFO fileinfo;
 
+   /* Recording related fields */
+   SNDFILE *record_file;
+   SF_INFO record_fileinfo;
+   bool recording_enabled;
+   char *record_filename;
+
    /* Flag to reset audio playback on loop sync */
    bool reset_audio;
    /* Volume level */
@@ -63,6 +69,10 @@ void on_process(void *userdata, struct spa_io_position *position);
 void process_midi(void *userdata, struct spa_io_position *position);
 void simple_process(void *userdata, struct spa_io_position *position);
 void stream_process(void *userdata);
+
+/* Recording functions */
+int start_recording(struct data *data, const char *filename);
+int stop_recording(struct data *data);
 
 /* Utility functions */
 void set_volume(struct data *data, float new_volume);
