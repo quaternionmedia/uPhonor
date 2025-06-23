@@ -58,6 +58,18 @@ struct data
    bool recording_enabled;
    char *record_filename;
 
+   /* Holophonor loop states */
+   enum holo_state
+   {
+      HOLO_STATE_EMPTY,
+      HOLO_STATE_RECORDING,
+      HOLO_STATE_PLAYING,
+      HOLO_STATE_STOPPED
+   };
+
+   /* Current Holophonor state */
+   enum holo_state current_state;
+
    /* Flag to reset audio playback on loop sync */
    bool reset_audio;
    /* Volume level */

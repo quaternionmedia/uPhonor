@@ -75,7 +75,37 @@ void process_midi(void *userdata, struct spa_io_position *position)
               }
               if ((*midi_data & 0xf0) == 0x90)
               {
-                pw_log_debug("Note On message received: 0x%02x", *midi_data);
+                pw_log_info("Note On message received: 0x%02x", *midi_data);
+
+                switch (data->current_state)
+                {
+                case HOLO_STATE_EMPTY:
+                  pw_log_info("Starting recording");
+                  start_recording(data, NULL);
+                  data->current_state = HOLO_STATE_RECORDING;
+                  break;
+                case HOLO_STATE_RECORDING:
+                  pw_log_info("Stopping recording");
+                  stop_recording(data);
+                  data->current_state = HOLO_STATE_PLAYING;
+                  break;
+                case HOLO_STATE_PLAYING:
+                  pw_log_info("Stopping playback");
+                  data->current_state = HOLO_STATE_STOPPED;
+                  break;
+                case HOLO_STATE_STOPPED:
+                  pw_log_info("Restarting playback");
+                  data->current_state = HOLO_STATE_PLAYING;
+                  // Reset playback position
+                  data->offset = 0;
+                  data->position = 0;
+                  break;
+
+                default:
+                  pw_log_warn("Unknown state %d, ignoring Note On message",
+                              data->current_state);
+                  break;
+                }
                 pw_log_info("Resetting audio playback due to Note On message");
                 data->reset_audio = true;
                 // set the volume from the Note On message velocity

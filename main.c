@@ -24,6 +24,8 @@ int main(int argc, char *argv[])
    data.record_file = NULL;
    data.record_filename = NULL;
 
+   data.current_state = HOLO_STATE_EMPTY;
+
    /* Set up buffer parameters for audio */
    const struct spa_pod *params[1];
    uint8_t buffer[1024];

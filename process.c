@@ -52,7 +52,7 @@ void play_file(void *userdata, struct spa_io_position *position)
   // Handle audio output
   if ((b = pw_filter_dequeue_buffer(data->audio_out)) == NULL)
   {
-    pw_log_warn("out of buffers");
+    pw_log_trace("Out of buffers");
     return;
   }
 
@@ -65,14 +65,14 @@ void play_file(void *userdata, struct spa_io_position *position)
   }
 
   uint32_t stride = sizeof(float);
-  pw_log_info("File info: channels=%d, samplerate=%d",
-              data->fileinfo.channels, data->fileinfo.samplerate);
-  pw_log_info("Buffer: maxsize=%d, stride=%d, calculated n_samples=%d",
-              b->buffer->datas[0].maxsize, stride, n_samples);
+  pw_log_trace("File info: channels=%d, samplerate=%d",
+               data->fileinfo.channels, data->fileinfo.samplerate);
+  pw_log_debug("Buffer: maxsize=%d, stride=%d, calculated n_samples=%d",
+               b->buffer->datas[0].maxsize, stride, n_samples);
   if (b->requested)
   {
     n_samples = SPA_MIN(n_samples, b->requested);
-    pw_log_info("Adjusted n_samples to %d based on requested=%d", n_samples, b->requested);
+    pw_log_warn("Adjusted n_samples to %d based on requested=%d", n_samples, b->requested);
   }
 
   // Temporary buffer for multi-channel data
