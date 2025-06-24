@@ -10,10 +10,10 @@ int start_recording(struct data *data, const char *filename)
     return -1;
   }
 
-  // Set up recording file info
-  data->record_fileinfo.samplerate = 48000; // Use default sample rate
-  data->record_fileinfo.channels = 1;       // Mono recording
-  data->record_fileinfo.format = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
+  // Set up recording file info using the negotiated format
+  data->record_fileinfo.samplerate = data->format.info.raw.rate > 0 ? data->format.info.raw.rate : 48000;
+  data->record_fileinfo.channels = 1;                             // Mono recording
+  data->record_fileinfo.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT; // Use float format
 
   // Generate filename if not provided
   char default_filename[256];

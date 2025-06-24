@@ -17,9 +17,10 @@ void on_process(void *userdata, struct spa_io_position *position)
   if (in == NULL || out == NULL)
     return;
 
+  pw_log_trace("Processing %d samples", n_samples);
+
   memcpy(out, in, n_samples * sizeof(float));
 }
-
 /* Play a file */
 void play_file(void *userdata, struct spa_io_position *position)
 {
@@ -33,23 +34,71 @@ void play_file(void *userdata, struct spa_io_position *position)
 
   process_midi(userdata, position);
 
+  // Always test if we can get input data, regardless of recording state
+  in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
+  if (in != NULL)
+  {
+    // Calculate RMS to see if there's actual audio data
+    float rms = 0.0f;
+    for (uint32_t i = 0; i < n_samples; i++)
+    {
+      rms += in[i] * in[i];
+    }
+    rms = sqrtf(rms / n_samples);
+
+    if (rms > 0.001f) // Only log if there's significant audio
+    {
+      pw_log_info("Input audio detected: RMS = %f", rms);
+    }
+  }
+  else
+  {
+    pw_log_trace("No input audio buffer available");
+  }
+
   // Handle audio input recording
   if (data->recording_enabled && data->record_file)
   {
-    in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
-    if (in != NULL)
+    if (in == NULL)
     {
-      // Write audio input to recording file
+      // No input connected - record silence
+      pw_log_trace("No input for recording, writing silence");
+      float *silence = calloc(n_samples, sizeof(float));
+      if (silence)
+      {
+        sf_count_t frames_written = sf_writef_float(data->record_file, silence, n_samples);
+        if (frames_written != n_samples)
+        {
+          pw_log_error("Could not write silence frames: wrote %ld of %d",
+                       frames_written, n_samples);
+        }
+        free(silence);
+      }
+    }
+    else
+    {
+      // We have input data - record it
+      pw_log_trace("Recording %d samples from input", n_samples);
+
       sf_count_t frames_written = sf_writef_float(data->record_file, in, n_samples);
       if (frames_written != n_samples)
       {
-        pw_log_warn("Could not write all frames to recording file: wrote %d of %d",
-                    frames_written, n_samples);
+        pw_log_error("Could not write all input frames: wrote %ld of %d. Error: %s",
+                     frames_written, n_samples, sf_strerror(data->record_file));
       }
+    }
+
+    // Periodically sync to disk
+    static int sync_counter = 0;
+    if (++sync_counter >= 100)
+    {
+      pw_log_debug("Syncing recording file to disk");
+      sf_write_sync(data->record_file);
+      sync_counter = 0;
     }
   }
 
-  // Handle audio output
+  // Rest of the function remains the same...
   if ((b = pw_filter_dequeue_buffer(data->audio_out)) == NULL)
   {
     pw_log_trace("Out of buffers");

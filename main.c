@@ -139,10 +139,10 @@ int main(int argc, char *argv[])
                                          NULL),
                                      NULL, 0);
 
-   params[0] = spa_process_latency_build(&builder,
-                                         SPA_PARAM_ProcessLatency,
-                                         &SPA_PROCESS_LATENCY_INFO_INIT(
-                                                 .ns = 10 * SPA_NSEC_PER_MSEC));
+   // params[0] = spa_process_latency_build(&builder,
+   //                                       SPA_PARAM_ProcessLatency,
+   //                                       &SPA_PROCESS_LATENCY_INFO_INIT(
+   //                                               .ns = 10 * SPA_NSEC_PER_MSEC));
 
    if (pw_filter_connect(data.filter,
                          PW_FILTER_FLAG_RT_PROCESS,
@@ -182,6 +182,10 @@ void state_changed(void *userdata, enum pw_filter_state old,
       data->clock_id = SPA_ID_INVALID;
       data->offset = 0;
       data->position = 0;
+
+      // Add some debugging for the ports
+      pw_log_info("Filter is now streaming - audio_in: %p, audio_out: %p",
+                  data->audio_in, data->audio_out);
       break;
    default:
       pw_log_info("filter state changed from %d to %d: %s",
