@@ -65,7 +65,7 @@ struct data
    /* Holophonor loop states */
    enum holo_state
    {
-      HOLO_STATE_EMPTY,
+      HOLO_STATE_IDLE,
       HOLO_STATE_RECORDING,
       HOLO_STATE_PLAYING,
       HOLO_STATE_STOPPED
@@ -89,6 +89,8 @@ void stream_process(void *userdata);
 /* Recording functions */
 int start_recording(struct data *data, const char *filename);
 int stop_recording(struct data *data);
+
+int start_playing(struct data *data, const char *filename);
 
 /* Utility functions */
 void set_volume(struct data *data, float new_volume);

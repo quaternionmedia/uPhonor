@@ -60,19 +60,21 @@ int stop_recording(struct data *data)
     return -1;
   }
 
-  if (data->record_file)
+  if (!data->file)
   {
+    pw_log_info("Copying recorded file to playback file");
+    // Close the recording file
     sf_close(data->record_file);
     data->record_file = NULL;
+    // Open the recorded file for playback
+    data->file = sf_open(data->record_filename, SFM_READ, &data->fileinfo);
+    if (!data->file)
+    {
+      pw_log_error("Could not open recorded file for playback: %s", sf_strerror(NULL));
+      return -1;
+    }
+    pw_log_info("Playback file set to: %s", data->record_filename);
   }
-
-  if (data->record_filename)
-  {
-    pw_log_info("Stopped recording to: %s", data->record_filename);
-    free(data->record_filename);
-    data->record_filename = NULL;
-  }
-
   data->recording_enabled = false;
   return 0;
 }

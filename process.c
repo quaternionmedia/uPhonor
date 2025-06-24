@@ -1,4 +1,5 @@
 #include "uphonor.h"
+#include "play.c"
 #include "process-midi.c"
 #include "record.c"
 

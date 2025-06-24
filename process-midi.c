@@ -79,7 +79,7 @@ void process_midi(void *userdata, struct spa_io_position *position)
 
                 switch (data->current_state)
                 {
-                case HOLO_STATE_EMPTY:
+                case HOLO_STATE_IDLE:
                   pw_log_info("Starting recording");
                   start_recording(data, NULL);
                   data->current_state = HOLO_STATE_RECORDING;
@@ -88,6 +88,11 @@ void process_midi(void *userdata, struct spa_io_position *position)
                   pw_log_info("Stopping recording");
                   stop_recording(data);
                   data->current_state = HOLO_STATE_PLAYING;
+                  if (!data->file)
+                  {
+                    pw_log_info("No audio file preloaded. Loading recorded file.");
+                    start_playing(data, data->record_filename);
+                  }
                   break;
                 case HOLO_STATE_PLAYING:
                   pw_log_info("Stopping playback");

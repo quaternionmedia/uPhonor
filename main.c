@@ -24,7 +24,7 @@ int main(int argc, char *argv[])
    data.record_file = NULL;
    data.record_filename = NULL;
 
-   data.current_state = HOLO_STATE_EMPTY;
+   data.current_state = HOLO_STATE_IDLE;
    // Initialize performance buffers (add after data initialization)
    data.max_buffer_size = 2048 * 8; // Support up to 8 channels at 2048 samples
    data.silence_buffer = calloc(data.max_buffer_size, sizeof(float));
