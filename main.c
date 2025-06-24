@@ -25,7 +25,16 @@ int main(int argc, char *argv[])
    data.record_filename = NULL;
 
    data.current_state = HOLO_STATE_EMPTY;
+   // Initialize performance buffers (add after data initialization)
+   data.max_buffer_size = 2048 * 8; // Support up to 8 channels at 2048 samples
+   data.silence_buffer = calloc(data.max_buffer_size, sizeof(float));
+   data.temp_audio_buffer = malloc(data.max_buffer_size * sizeof(float));
 
+   if (!data.silence_buffer || !data.temp_audio_buffer)
+   {
+      fprintf(stderr, "Failed to allocate audio buffers\n");
+      return -1;
+   }
    /* Set up buffer parameters for audio */
    const struct spa_pod *params[1];
    uint8_t buffer[1024];
@@ -165,6 +174,10 @@ int main(int argc, char *argv[])
    {
       stop_recording(&data);
    }
+
+   // Free performance buffers
+   free(data.silence_buffer);
+   free(data.temp_audio_buffer);
 
    return 0;
 }

@@ -47,6 +47,10 @@ struct data
    int64_t offset;
    uint64_t position;
 
+   uint32_t max_buffer_size; // Maximum expected buffer size
+   float *silence_buffer;    // Pre-allocated silence buffer
+   float *temp_audio_buffer; // Pre-allocated temp buffer for multi-channel
+
    /* libsndfile stuff used to read samples from the input audio
       file. */
    SNDFILE *file;
