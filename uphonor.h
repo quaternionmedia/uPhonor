@@ -20,7 +20,7 @@
 
 struct port
 {
-   double accumulator;
+  double accumulator;
 };
 
 /* A common pattern for PipeWire is to provide a user data void
@@ -31,53 +31,53 @@ struct port
    struct data is just that. */
 struct data
 {
-   /* Keep some references to PipeWire objects. */
-   struct pw_main_loop *loop;
-   struct pw_core *core;
+  /* Keep some references to PipeWire objects. */
+  struct pw_main_loop *loop;
+  struct pw_core *core;
 
-   struct pw_stream *stream;
+  struct pw_stream *stream;
 
-   struct pw_filter *filter;
-   struct pw_filter_port *audio_in;
-   struct pw_filter_port *audio_out;
-   struct pw_filter_port *midi_in;
-   struct pw_filter_port *midi_out;
-   struct spa_audio_info format;
-   uint32_t clock_id;
-   int64_t offset;
-   uint64_t position;
+  struct pw_filter *filter;
+  struct pw_filter_port *audio_in;
+  struct pw_filter_port *audio_out;
+  struct pw_filter_port *midi_in;
+  struct pw_filter_port *midi_out;
+  struct spa_audio_info format;
+  uint32_t clock_id;
+  int64_t offset;
+  uint64_t position;
 
-   uint32_t max_buffer_size; // Maximum expected buffer size
-   float *silence_buffer;    // Pre-allocated silence buffer
-   float *temp_audio_buffer; // Pre-allocated temp buffer for multi-channel
+  uint32_t max_buffer_size; // Maximum expected buffer size
+  float *silence_buffer;    // Pre-allocated silence buffer
+  float *temp_audio_buffer; // Pre-allocated temp buffer for multi-channel
 
-   /* libsndfile stuff used to read samples from the input audio
-      file. */
-   SNDFILE *file;
-   SF_INFO fileinfo;
+  /* libsndfile stuff used to read samples from the input audio
+     file. */
+  SNDFILE *file;
+  SF_INFO fileinfo;
 
-   /* Recording related fields */
-   SNDFILE *record_file;
-   SF_INFO record_fileinfo;
-   bool recording_enabled;
-   char *record_filename;
+  /* Recording related fields */
+  SNDFILE *record_file;
+  SF_INFO record_fileinfo;
+  bool recording_enabled;
+  char *record_filename;
 
-   /* Holophonor loop states */
-   enum holo_state
-   {
-      HOLO_STATE_IDLE,
-      HOLO_STATE_RECORDING,
-      HOLO_STATE_PLAYING,
-      HOLO_STATE_STOPPED
-   };
+  /* Holophonor loop states */
+  enum holo_state
+  {
+    HOLO_STATE_IDLE,
+    HOLO_STATE_RECORDING,
+    HOLO_STATE_PLAYING,
+    HOLO_STATE_STOPPED
+  };
 
-   /* Current Holophonor state */
-   enum holo_state current_state;
+  /* Current Holophonor state */
+  enum holo_state current_state;
 
-   /* Flag to reset audio playback on loop sync */
-   bool reset_audio;
-   /* Volume level */
-   float volume;
+  /* Flag to reset audio playback on loop sync */
+  bool reset_audio;
+  /* Volume level */
+  float volume;
 };
 
 /* Function declarations */
