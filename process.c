@@ -3,28 +3,7 @@
 #include "process-midi.c"
 #include "record.c"
 
-/* Simple in->out passthrough */
 void on_process(void *userdata, struct spa_io_position *position)
-{
-  struct data *data = userdata;
-  float *in, *out;
-  uint32_t n_samples = position->clock.duration;
-
-  pw_log_trace("do process %d", n_samples);
-
-  in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
-  out = pw_filter_get_dsp_buffer(data->audio_out, n_samples);
-
-  if (in == NULL || out == NULL)
-    return;
-
-  pw_log_trace("Processing %d samples", n_samples);
-
-  memcpy(out, in, n_samples * sizeof(float));
-}
-
-/* Play a file - optimized version */
-void play_file(void *userdata, struct spa_io_position *position)
 {
   struct data *data = userdata;
   struct pw_buffer *b;
@@ -37,9 +16,7 @@ void play_file(void *userdata, struct spa_io_position *position)
   static int sync_counter = 0;
   static int rms_skip_counter = 0;
 
-  float *in, *out;
-
-  pw_log_trace("play file %d", n_samples);
+  float *in;
 
   process_midi(userdata, position);
 
@@ -109,6 +86,11 @@ void play_file(void *userdata, struct spa_io_position *position)
       sf_write_sync(data->record_file);
       sync_counter = 0;
     }
+  }
+
+  if (data->current_state != HOLO_STATE_PLAYING)
+  {
+    return; // Skip processing if not in playing state
   }
 
   // Get output buffer

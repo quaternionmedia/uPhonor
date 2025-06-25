@@ -8,8 +8,7 @@ struct pw_filter_events filter_events = {
     .state_changed = state_changed,
     .param_changed = on_param_changed,
 
-    //  .process = on_process,
-    .process = play_file
+    .process = on_process,
     //  .process = tone,
 };
 
