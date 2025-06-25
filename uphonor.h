@@ -17,6 +17,7 @@
 #include <spa/param/format.h>
 #include <sndfile.h>
 #include <spa/param/audio/format-utils.h>
+#include <sys/stat.h>
 
 struct port
 {

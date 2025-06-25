@@ -1,5 +1,4 @@
 #include "uphonor.h"
-#include <sys/stat.h>
 
 /* Function to start recording */
 int start_recording(struct data *data, const char *filename)
@@ -23,13 +22,6 @@ int start_recording(struct data *data, const char *filename)
     struct tm *tm_info = localtime(&now);
     strftime(default_filename, sizeof(default_filename), "recording_%Y%m%d_%H%M%S.wav", tm_info);
     filename = default_filename;
-  }
-
-  // Create recordings directory if it doesn't exist
-  struct stat st = {0};
-  if (stat("recordings", &st) == -1)
-  {
-    mkdir("recordings", 0755);
   }
 
   // Construct full path

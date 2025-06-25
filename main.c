@@ -24,11 +24,20 @@ int main(int argc, char *argv[])
   data.record_file = NULL;
   data.record_filename = NULL;
 
+  data.volume = 1.0f; // Default volume level
+
   data.current_state = HOLO_STATE_IDLE;
   // Initialize performance buffers (add after data initialization)
   data.max_buffer_size = 2048 * 8; // Support up to 8 channels at 2048 samples
   data.silence_buffer = calloc(data.max_buffer_size, sizeof(float));
   data.temp_audio_buffer = malloc(data.max_buffer_size * sizeof(float));
+
+  // Create recordings directory if it doesn't exist
+  struct stat st = {0};
+  if (stat("recordings", &st) == -1)
+  {
+    mkdir("recordings", 0755);
+  }
 
   if (!data.silence_buffer || !data.temp_audio_buffer)
   {
@@ -39,13 +48,6 @@ int main(int argc, char *argv[])
   const struct spa_pod *params[1];
   uint8_t buffer[1024];
   struct spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
-
-  int cli_status = cli(argc, argv, &data);
-  if (cli_status != 0)
-  {
-    fprintf(stderr, "Error in command line interface: %d\n", cli_status);
-    return cli_status;
-  }
 
   /* We initialise libpipewire. This mainly reads some
      environment variables and initialises logging. */
@@ -160,6 +162,13 @@ int main(int argc, char *argv[])
   {
     fprintf(stderr, "can't connect\n");
     return -1;
+  }
+
+  int cli_status = cli(argc, argv, &data);
+  if (cli_status != 0)
+  {
+    fprintf(stderr, "Error in command line interface: %d\n", cli_status);
+    return cli_status;
   }
 
   pw_main_loop_run(data.loop);
