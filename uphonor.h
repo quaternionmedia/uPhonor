@@ -93,6 +93,8 @@ int stop_recording(struct data *data);
 
 int start_playing(struct data *data, const char *filename);
 
+void process_loops(struct data *data, struct spa_io_position *position, float volume);
+
 /* Utility functions */
 void set_volume(struct data *data, float new_volume);
 float linear_to_db_volume(float linear_volume);
