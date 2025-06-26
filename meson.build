@@ -10,8 +10,18 @@ pipewire = dependency('libpipewire-0.3')
 sndfile = dependency('sndfile')
 alsa = dependency('alsa')
 
-# exe
-executable('uphonor', 'uphonor.h', 'main.c', dependencies : [pipewire, sndfile, alsa, math], install : true)
+# sources
+uphonor_sources = [
+  'uphonor.h', 
+  'main.c',
+  'audio_processing.c',
+  'midi_processing.c', 
+  'buffer_manager.c',
+  'record.c',
+]
+
+# exes
+executable('uphonor', uphonor_sources, dependencies : [pipewire, sndfile, alsa, math], install : true)
 # executable('midi', 'midi.c', dependencies : [pipewire, alsa], install : true)
 executable('stream', 'stream.c', dependencies: [pipewire, sndfile])
 executable('play', 'play-file.c', dependencies: [pipewire, sndfile])

@@ -1,7 +1,7 @@
 #include "uphonor.h"
 #include "cli.c"
 #include "pipe.c"
-#include "process.c"
+#include "process_new.c"
 
 struct pw_filter_events filter_events = {
     PW_VERSION_FILTER_EVENTS,

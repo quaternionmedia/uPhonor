@@ -1,6 +1,6 @@
 #include "uphonor.h"
 
-/* Function to start recording */
+/* Recording and playback functions */
 int start_recording(struct data *data, const char *filename)
 {
   if (data->recording_enabled)
@@ -43,7 +43,6 @@ int start_recording(struct data *data, const char *filename)
   return 0;
 }
 
-/* Function to stop recording */
 int stop_recording(struct data *data)
 {
   if (!data->recording_enabled)

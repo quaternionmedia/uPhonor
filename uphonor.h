@@ -83,15 +83,11 @@ struct data
 
 /* Function declarations */
 void on_process(void *userdata, struct spa_io_position *position);
-void process_midi(void *userdata, struct spa_io_position *position);
-void simple_process(void *userdata, struct spa_io_position *position);
-void stream_process(void *userdata);
 
-/* Recording functions */
-int start_recording(struct data *data, const char *filename);
-int stop_recording(struct data *data);
-
-int start_playing(struct data *data, const char *filename);
+/* Include modular headers */
+#include "audio_processing.h"
+#include "midi_processing.h"
+#include "buffer_manager.h"
 
 void process_loops(struct data *data, struct spa_io_position *position, float volume);
 
