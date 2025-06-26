@@ -17,10 +17,11 @@
 #include <spa/param/format.h>
 #include <sndfile.h>
 #include <spa/param/audio/format-utils.h>
+#include <sys/stat.h>
 
 struct port
 {
-   double accumulator;
+  double accumulator;
 };
 
 /* A common pattern for PipeWire is to provide a user data void
@@ -31,31 +32,53 @@ struct port
    struct data is just that. */
 struct data
 {
-   /* Keep some references to PipeWire objects. */
-   struct pw_main_loop *loop;
-   struct pw_core *core;
+  /* Keep some references to PipeWire objects. */
+  struct pw_main_loop *loop;
+  struct pw_core *core;
 
-   struct pw_stream *stream;
+  struct pw_stream *stream;
 
-   struct pw_filter *filter;
-   struct pw_filter_port *audio_in;
-   struct pw_filter_port *audio_out;
-   struct pw_filter_port *midi_in;
-   struct pw_filter_port *midi_out;
-   struct spa_audio_info format;
-   uint32_t clock_id;
-   int64_t offset;
-   uint64_t position;
+  struct pw_filter *filter;
+  struct pw_filter_port *audio_in;
+  struct pw_filter_port *audio_out;
+  struct pw_filter_port *midi_in;
+  struct pw_filter_port *midi_out;
+  struct spa_audio_info format;
+  uint32_t clock_id;
+  int64_t offset;
+  uint64_t position;
 
-   /* libsndfile stuff used to read samples from the input audio
-      file. */
-   SNDFILE *file;
-   SF_INFO fileinfo;
+  uint32_t max_buffer_size; // Maximum expected buffer size
+  float *silence_buffer;    // Pre-allocated silence buffer
+  float *temp_audio_buffer; // Pre-allocated temp buffer for multi-channel
 
-   /* Flag to reset audio playback on loop sync */
-   bool reset_audio;
-   /* Volume level */
-   float volume;
+  /* libsndfile stuff used to read samples from the input audio
+     file. */
+  SNDFILE *file;
+  SF_INFO fileinfo;
+
+  /* Recording related fields */
+  SNDFILE *record_file;
+  SF_INFO record_fileinfo;
+  bool recording_enabled;
+  char *record_filename;
+
+  /* Holophonor loop states */
+  enum holo_state
+  {
+    HOLO_STATE_IDLE,
+    HOLO_STATE_RECORDING,
+    HOLO_STATE_PLAYING,
+    HOLO_STATE_STOPPED
+  };
+
+  /* Current Holophonor state */
+  enum holo_state current_state;
+
+  /* Flag to reset audio playback on loop sync */
+  bool reset_audio;
+  /* Volume level */
+  float volume;
 };
 
 /* Function declarations */
@@ -63,6 +86,14 @@ void on_process(void *userdata, struct spa_io_position *position);
 void process_midi(void *userdata, struct spa_io_position *position);
 void simple_process(void *userdata, struct spa_io_position *position);
 void stream_process(void *userdata);
+
+/* Recording functions */
+int start_recording(struct data *data, const char *filename);
+int stop_recording(struct data *data);
+
+int start_playing(struct data *data, const char *filename);
+
+void process_loops(struct data *data, struct spa_io_position *position, float volume);
 
 /* Utility functions */
 void set_volume(struct data *data, float new_volume);

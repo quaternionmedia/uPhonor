@@ -1,48 +1,102 @@
 #include "uphonor.h"
+#include "play.c"
 #include "process-midi.c"
+#include "record.c"
 
-/* Simple in->out passthrough */
 void on_process(void *userdata, struct spa_io_position *position)
-{
-  struct data *data = userdata;
-  float *in, *out;
-  uint32_t n_samples = position->clock.duration;
-
-  pw_log_trace("do process %d", n_samples);
-
-  in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
-  out = pw_filter_get_dsp_buffer(data->audio_out, n_samples);
-
-  if (in == NULL || out == NULL)
-    return;
-
-  memcpy(out, in, n_samples * sizeof(float));
-}
-
-/* Play a file */
-void play_file(void *userdata, struct spa_io_position *position)
 {
   struct data *data = userdata;
   struct pw_buffer *b;
   uint32_t n_samples = position->clock.duration;
 
-  float *in, *out;
+  // Pre-allocated static buffers to avoid malloc/free in real-time
+  static float *silence_buffer = NULL;
+  static float *temp_buffer = NULL;
+  static uint32_t buffer_size = 0;
+  static int sync_counter = 0;
+  static int rms_skip_counter = 0;
 
-  pw_log_trace("play file %d", n_samples);
+  float *in;
 
   process_midi(userdata, position);
 
-  // in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
-  // out = pw_filter_get_dsp_buffer(data->audio_out, n_samples);
+  // Initialize buffers on first call or when size changes
+  if (buffer_size < n_samples * data->fileinfo.channels)
+  {
+    buffer_size = n_samples * data->fileinfo.channels * 2; // Extra space for future growth
 
-  // if (in == NULL)
-  //   return;
+    silence_buffer = realloc(silence_buffer, buffer_size * sizeof(float));
+    temp_buffer = realloc(temp_buffer, buffer_size * sizeof(float));
 
-  // memcpy(out, in, n_samples * sizeof(float));
+    if (!silence_buffer || !temp_buffer)
+    {
+      pw_log_error("Failed to allocate audio buffers");
+      return;
+    }
 
+    // Pre-fill silence buffer once
+    memset(silence_buffer, 0, buffer_size * sizeof(float));
+  }
+
+  // Get input buffer for recording
+  in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
+
+  // Only calculate RMS occasionally to reduce CPU load
+  if (in != NULL && ++rms_skip_counter >= 10)
+  {
+    float rms = 0.0f;
+    for (uint32_t i = 0; i < n_samples; i++)
+    {
+      rms += in[i] * in[i];
+    }
+    rms = sqrtf(rms / n_samples);
+
+    if (rms > 0.001f)
+    {
+      pw_log_info("Input audio detected: RMS = %f", rms);
+    }
+    rms_skip_counter = 0;
+  }
+
+  // Handle audio input recording - optimized
+  if (data->recording_enabled && data->record_file)
+  {
+    sf_count_t frames_written;
+
+    if (in == NULL)
+    {
+      // Use pre-allocated silence buffer
+      frames_written = sf_writef_float(data->record_file, silence_buffer, n_samples);
+    }
+    else
+    {
+      // Direct write of input data
+      frames_written = sf_writef_float(data->record_file, in, n_samples);
+    }
+
+    if (frames_written != n_samples)
+    {
+      pw_log_error("Could not write all frames: wrote %ld of %d",
+                   frames_written, n_samples);
+    }
+
+    // Sync to disk less frequently (every 500 callbacks ~= 10 seconds at 48kHz/1024)
+    if (++sync_counter >= 500)
+    {
+      sf_write_sync(data->record_file);
+      sync_counter = 0;
+    }
+  }
+
+  if (data->current_state != HOLO_STATE_PLAYING)
+  {
+    return; // Skip processing if not in playing state
+  }
+
+  // Get output buffer
   if ((b = pw_filter_dequeue_buffer(data->audio_out)) == NULL)
   {
-    pw_log_warn("out of buffers");
+    pw_log_trace("Out of buffers");
     return;
   }
 
@@ -55,25 +109,13 @@ void play_file(void *userdata, struct spa_io_position *position)
   }
 
   uint32_t stride = sizeof(float);
-  pw_log_info("File info: channels=%d, samplerate=%d",
-              data->fileinfo.channels, data->fileinfo.samplerate);
-  pw_log_info("Buffer: maxsize=%d, stride=%d, calculated n_samples=%d",
-              b->buffer->datas[0].maxsize, stride, n_samples);
+
   if (b->requested)
   {
     n_samples = SPA_MIN(n_samples, b->requested);
-    pw_log_info("Adjusted n_samples to %d based on requested=%d", n_samples, b->requested);
   }
 
-  // Temporary buffer for multi-channel data
-  float *temp_buf = malloc(n_samples * data->fileinfo.channels * sizeof(float));
-  if (!temp_buf)
-  {
-    pw_log_error("Failed to allocate temporary buffer");
-    pw_filter_queue_buffer(data->audio_out, b);
-    return;
-  }
-
+  // Handle audio reset
   if (data->reset_audio)
   {
     pw_log_info("Resetting audio playback position");
@@ -81,26 +123,60 @@ void play_file(void *userdata, struct spa_io_position *position)
     data->reset_audio = false;
   }
 
-  sf_count_t frames_read = sf_readf_float(data->file, temp_buf, n_samples);
-  pw_log_debug("read %d frames from file", frames_read);
+  // Read audio data - optimized for mono output
+  sf_count_t frames_read;
 
+  if (data->fileinfo.channels == 1)
+  {
+    // Direct read for mono files
+    frames_read = sf_readf_float(data->file, buf, n_samples);
+  }
+  else
+  {
+    // Read multi-channel data and extract first channel
+    frames_read = sf_readf_float(data->file, temp_buffer, n_samples);
+
+    // Optimized channel extraction using pointer arithmetic
+    float *src = temp_buffer;
+    for (uint32_t i = 0; i < frames_read; i++)
+    {
+      buf[i] = *src;
+      src += data->fileinfo.channels;
+    }
+  }
+
+  // Handle end of file with single seek operation
   if (frames_read < n_samples)
   {
-    pw_log_debug("not enough frames read, seeking to start and reading again");
     sf_seek(data->file, 0, SEEK_SET);
-    sf_count_t additional = sf_readf_float(data->file,
-                                           &temp_buf[frames_read * data->fileinfo.channels],
-                                           n_samples - frames_read);
-    frames_read += additional;
+
+    sf_count_t remaining = n_samples - frames_read;
+    if (data->fileinfo.channels == 1)
+    {
+      sf_count_t additional = sf_readf_float(data->file, &buf[frames_read], remaining);
+      frames_read += additional;
+    }
+    else
+    {
+      sf_count_t additional = sf_readf_float(data->file, temp_buffer, remaining);
+      float *src = temp_buffer;
+      for (uint32_t i = 0; i < additional; i++)
+      {
+        buf[frames_read + i] = *src;
+        src += data->fileinfo.channels;
+      }
+      frames_read += additional;
+    }
   }
 
-  // Extract only the first channel
-  for (uint32_t i = 0; i < frames_read; i++)
+  // Apply volume in-place (vectorizable by compiler)
+  if (data->volume != 1.0f)
   {
-    buf[i] = temp_buf[i * data->fileinfo.channels] * data->volume;
+    for (uint32_t i = 0; i < frames_read; i++)
+    {
+      buf[i] *= data->volume;
+    }
   }
-
-  free(temp_buf);
 
   b->buffer->datas[0].chunk->offset = 0;
   b->buffer->datas[0].chunk->stride = stride;
