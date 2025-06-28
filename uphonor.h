@@ -18,6 +18,7 @@
 #include <sndfile.h>
 #include <spa/param/audio/format-utils.h>
 #include <sys/stat.h>
+#include "rt_nonrt_bridge.h"
 
 struct port
 {
@@ -79,19 +80,19 @@ struct data
   bool reset_audio;
   /* Volume level */
   float volume;
+
+  /* RT/Non-RT bridge for performance-critical operations */
+  struct rt_nonrt_bridge rt_bridge;
 };
 
 /* Function declarations */
 void on_process(void *userdata, struct spa_io_position *position);
-void process_midi(void *userdata, struct spa_io_position *position);
-void simple_process(void *userdata, struct spa_io_position *position);
-void stream_process(void *userdata);
 
-/* Recording functions */
-int start_recording(struct data *data, const char *filename);
-int stop_recording(struct data *data);
-
-int start_playing(struct data *data, const char *filename);
+/* Include modular headers */
+#include "audio_processing.h"
+#include "midi_processing.h"
+#include "buffer_manager.h"
+#include "rt_nonrt_bridge.h"
 
 void process_loops(struct data *data, struct spa_io_position *position, float volume);
 
