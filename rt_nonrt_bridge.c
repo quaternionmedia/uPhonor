@@ -353,7 +353,7 @@ void *nonrt_worker_thread(void *arg)
     }
 
     /* Small sleep to prevent busy-wait */
-    usleep(1000); /* 1ms */
+    // usleep(1000); /* 1ms */
   }
 
   /* Cleanup */

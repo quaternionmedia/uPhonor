@@ -30,7 +30,7 @@ Handles all MIDI-related functionality:
 - `handle_note_on()` / `handle_note_off()` - Specific note event handlers
 - `parse_midi_sequence()` - Parses MIDI sequence data
 
-### 4. Main Process (`process_new.c`)
+### 4. Main Process (`process.c`)
 Simplified main processing function that orchestrates the modules:
 - `on_process()` - Main processing callback that calls modular functions
 
@@ -44,8 +44,6 @@ Simplified main processing function that orchestrates the modules:
 
 ## Migration Notes
 
-- The old `process.c` file has been replaced with `process_new.c`
-- The old `process-midi.c` functionality is now in `midi_processing.c`
 - Buffer management code has been extracted to `buffer_manager.c`
 - Audio processing code has been extracted to `audio_processing.c`
 

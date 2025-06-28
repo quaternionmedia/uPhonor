@@ -25,7 +25,9 @@ uphonor_sources = [
 
 # exes
 executable('uphonor', uphonor_sources, dependencies : [pipewire, sndfile, alsa, math, threads], install : true)
-# executable('midi', 'midi.c', dependencies : [pipewire, alsa], install : true)
-executable('stream', 'stream.c', dependencies: [pipewire, sndfile])
-executable('play', 'play-file.c', dependencies: [pipewire, sndfile])
-executable('filter', 'filter.c', dependencies: [pipewire, math])
+
+# examples
+# executable('midi', 'examples/midi.c', dependencies : [pipewire, alsa], install : true)
+# executable('stream', 'examples/stream.c', dependencies: [pipewire, sndfile])
+# executable('play', 'examples/play-file.c', dependencies: [pipewire, sndfile])
+# executable('filter', 'examples/filter.c', dependencies: [pipewire, math])

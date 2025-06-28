@@ -1,7 +1,7 @@
 #include "uphonor.h"
 #include "cli.c"
 #include "pipe.c"
-#include "process_new.c"
+#include "process.c"
 #include "audio_processing_rt.h"
 
 struct pw_filter_events filter_events = {

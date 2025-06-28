@@ -29,7 +29,7 @@ void process_loops(struct data *data, struct spa_io_position *position, float vo
     stop_recording(data);
 
     /* Give the RT bridge a moment to finish processing */
-    usleep(10000); // 10ms
+    // usleep(1000); // 1ms
 
     data->current_state = HOLO_STATE_PLAYING;
     if (!data->file)
