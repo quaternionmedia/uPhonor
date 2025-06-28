@@ -21,3 +21,15 @@ float linear_to_db_volume(float linear_volume)
     return 0.0f;
   return powf(linear_volume, 2.0f); // Square for more natural feel
 }
+
+void set_playback_speed(struct data *data, float new_speed)
+{
+  // Clamp playback speed to reasonable range
+  if (new_speed < 0.1f)
+    new_speed = 0.1f;  // Minimum 0.1x speed
+  if (new_speed > 8.0f)
+    new_speed = 8.0f;  // Maximum 8x speed
+
+  data->playback_speed = new_speed;
+  pw_log_info("Playback speed set to %.2fx", new_speed);
+}
