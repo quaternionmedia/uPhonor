@@ -31,6 +31,9 @@ jobs:
       - name: 🏗️ Build package
         run: cd build && meson compile
 
+      - name: ❎ Make executable
+        run: chmod +x build/uphonor
+
       - name: 🕊 Create Release
         uses: softprops/action-gh-release@v2
         with:
