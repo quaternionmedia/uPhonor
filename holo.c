@@ -1,4 +1,8 @@
 #include "uphonor.h"
+#include "rt_nonrt_bridge.h"
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 // This function processes the loops based on the current state
 void process_loops(struct data *data, struct spa_io_position *position, float volume)
@@ -23,11 +27,35 @@ void process_loops(struct data *data, struct spa_io_position *position, float vo
   case HOLO_STATE_RECORDING:
     pw_log_info("Stopping recording");
     stop_recording(data);
+
+    /* Give the RT bridge a moment to finish processing */
+    usleep(10000); // 10ms
+
     data->current_state = HOLO_STATE_PLAYING;
     if (!data->file)
     {
       pw_log_info("No audio file preloaded. Loading recorded file.");
-      start_playing(data, data->record_filename);
+
+      /* Get the actual filename that was used for recording */
+      const char *recorded_filename = rt_bridge_get_current_filename(&data->rt_bridge);
+      pw_log_info("RT bridge reports filename: %s", recorded_filename ? recorded_filename : "NULL");
+
+      if (recorded_filename)
+      {
+        /* Update our record_filename pointer to the recorded file */
+        if (data->record_filename)
+        {
+          free(data->record_filename);
+        }
+        data->record_filename = strdup(recorded_filename);
+        pw_log_info("Starting playback of: %s", data->record_filename);
+        start_playing(data, data->record_filename);
+      }
+      else
+      {
+        pw_log_error("No recorded file found to play back");
+        data->current_state = HOLO_STATE_IDLE;
+      }
     }
     break;
   case HOLO_STATE_PLAYING:

@@ -1,5 +1,6 @@
 #include "uphonor.h"
 #include "audio_processing.h"
+#include "audio_processing_rt.h"
 #include "midi_processing.h"
 
 void on_process(void *userdata, struct spa_io_position *position)
@@ -10,9 +11,9 @@ void on_process(void *userdata, struct spa_io_position *position)
   // Process MIDI input and output
   process_midi_input(data, position);
 
-  // Handle audio input (recording)
-  handle_audio_input(data, n_samples);
+  // Handle audio input (recording) - RT-optimized
+  handle_audio_input_rt(data, n_samples);
 
-  // Process audio output (playback)
-  process_audio_output(data, position);
+  // Process audio output (playback) - RT-optimized
+  process_audio_output_rt(data, position);
 }

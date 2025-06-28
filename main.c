@@ -2,6 +2,7 @@
 #include "cli.c"
 #include "pipe.c"
 #include "process_new.c"
+#include "audio_processing_rt.h"
 
 struct pw_filter_events filter_events = {
     PW_VERSION_FILTER_EVENTS,
@@ -30,6 +31,18 @@ int main(int argc, char *argv[])
   data.max_buffer_size = 2048 * 8; // Support up to 8 channels at 2048 samples
   data.silence_buffer = calloc(data.max_buffer_size, sizeof(float));
   data.temp_audio_buffer = malloc(data.max_buffer_size * sizeof(float));
+
+  // Initialize RT/Non-RT bridge for performance-critical operations
+  if (rt_nonrt_bridge_init(&data.rt_bridge,
+                           65536, // 64K sample ring buffer (~1.3 seconds at 48kHz)
+                           256    // 256 message queue slots
+                           ) < 0)
+  {
+    fprintf(stderr, "Failed to initialize RT/Non-RT bridge\n");
+    free(data.silence_buffer);
+    free(data.temp_audio_buffer);
+    return -1;
+  }
 
   // Create recordings directory if it doesn't exist
   struct stat st = {0};
@@ -182,6 +195,15 @@ int main(int argc, char *argv[])
   {
     stop_recording(&data);
   }
+
+  // Free allocated filename string
+  if (data.record_filename)
+  {
+    free(data.record_filename);
+  }
+
+  // Destroy RT/Non-RT bridge
+  rt_nonrt_bridge_cleanup(&data.rt_bridge);
 
   // Free performance buffers
   free(data.silence_buffer);
