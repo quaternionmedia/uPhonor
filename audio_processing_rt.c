@@ -280,78 +280,85 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
   }
 
   /* Process each output sample */
-  static double pitch_accumulator = 0.0;  /* Tracks pitch-based sample consumption */
-  
   for (uint32_t i = 0; i < n_samples; i++)
   {
     /* Step 1: Speed control - ONLY affects timeline advancement (tempo)
-     * This determines WHERE in the song we are, but not HOW we sample it */
+     * This determines WHERE in the song we are based on playback speed */
     double file_timeline_position = virtual_time * data->playback_speed;
-    double base_file_position = file_timeline_position * (double)data->fileinfo.samplerate;
+    double speed_file_position = file_timeline_position * (double)data->fileinfo.samplerate;
     
-    /* Step 2: Pitch control - ONLY affects frequency content sampling
-     * Pitch determines how fast we consume samples for frequency content
-     * This is independent of tempo/timeline position */
+    /* Handle file looping for speed-controlled position */
+    double base_file_position = fmod(speed_file_position, (double)total_frames);
+    if (base_file_position < 0) base_file_position += total_frames;
     
-    /* For each output sample, we advance through pitch-shifted content */
-    double pitch_sample_position = base_file_position + pitch_accumulator;
+    /* Step 2: Pitch control - INDEPENDENT frequency resampling
+     * Read multiple samples around the current position and resample them
+     * based on pitch_shift to achieve frequency change without tempo change */
     
-    /* Handle file looping */
-    double file_position = fmod(pitch_sample_position, (double)total_frames);
-    if (file_position < 0) file_position += total_frames;
+    const int PITCH_WINDOW_SIZE = 4;  /* Small window for pitch resampling */
+    static float pitch_buffer[8];     /* Buffer for pitch processing */
     
-    sf_count_t sample_index = (sf_count_t)file_position;
-    double frac = file_position - sample_index;
-
-    /* Read from file */
-    if (sf_seek(data->file, sample_index, SEEK_SET) != sample_index)
+    /* Read a small window of samples around the current position */
+    sf_count_t base_sample_index = (sf_count_t)base_file_position;
+    
+    /* Ensure we don't read past end of file */
+    sf_count_t samples_to_read = SPA_MIN(PITCH_WINDOW_SIZE, total_frames - base_sample_index);
+    
+    if (sf_seek(data->file, base_sample_index, SEEK_SET) != base_sample_index)
     {
       buf[i] = 0.0f;
+      virtual_time += time_step;
+      continue;
+    }
+    
+    sf_count_t frames_read;
+    if (data->fileinfo.channels == 1)
+    {
+      frames_read = sf_readf_float(data->file, pitch_buffer, samples_to_read);
     }
     else
     {
-      static float temp_buffer[8];
-      sf_count_t frames_to_read = SPA_MIN(2, total_frames - sample_index);
-      sf_count_t frames_read;
+      /* Multi-channel - extract first channel */
+      static float temp_multichannel[32];
+      sf_count_t temp_frames = sf_readf_float(data->file, temp_multichannel, samples_to_read);
       
-      if (data->fileinfo.channels == 1)
+      for (sf_count_t j = 0; j < temp_frames && j < PITCH_WINDOW_SIZE; j++)
       {
-        frames_read = sf_readf_float(data->file, temp_buffer, frames_to_read);
+        pitch_buffer[j] = temp_multichannel[j * data->fileinfo.channels];
       }
-      else
-      {
-        /* Multi-channel - extract first channel */
-        static float temp_multichannel[16];
-        sf_count_t temp_frames = sf_readf_float(data->file, temp_multichannel, frames_to_read);
-        
-        for (sf_count_t j = 0; j < temp_frames; j++)
-        {
-          temp_buffer[j] = temp_multichannel[j * data->fileinfo.channels];
-        }
-        frames_read = temp_frames;
-      }
-
-      if (frames_read <= 0)
-      {
-        buf[i] = 0.0f;
-      }
-      else
-      {
-        /* Interpolate for smooth playback */
-        float sample = temp_buffer[0];
-        if (frames_read > 1 && frac > 0.0)
-        {
-          sample = temp_buffer[0] + (temp_buffer[1] - temp_buffer[0]) * frac;
-        }
-        buf[i] = sample;
-      }
+      frames_read = temp_frames;
     }
+    
+    if (frames_read <= 0)
+    {
+      buf[i] = 0.0f;
+      virtual_time += time_step;
+      continue;
+    }
+    
+    /* Apply pitch shift through resampling within the window
+     * Higher pitch = sample at fractional positions < 1.0
+     * Lower pitch = sample at fractional positions > 1.0
+     * This ONLY affects frequency, NOT timeline position */
+    
+    double pitch_sample_offset = (double)i * (1.0 / data->pitch_shift);
+    double pitch_frac_pos = fmod(pitch_sample_offset, (double)frames_read);
+    
+    sf_count_t pitch_index = (sf_count_t)pitch_frac_pos;
+    double pitch_frac = pitch_frac_pos - pitch_index;
+    
+    /* Interpolate within the pitch window */
+    float sample = pitch_buffer[pitch_index];
+    if (pitch_index + 1 < frames_read && pitch_frac > 0.0)
+    {
+      sample = pitch_buffer[pitch_index] + 
+               (pitch_buffer[pitch_index + 1] - pitch_buffer[pitch_index]) * pitch_frac;
+    }
+    
+    buf[i] = sample;
 
     /* Advance virtual time at constant rate (this controls tempo only) */
     virtual_time += time_step;
-    
-    /* Advance pitch accumulator (this controls frequency only) */
-    pitch_accumulator += data->pitch_shift - 1.0;  /* Relative to normal pitch */
   }
 
   /* Update position based on actual speed-controlled advancement only */
