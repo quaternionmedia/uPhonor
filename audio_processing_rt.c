@@ -291,11 +291,11 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     initialized = true;
   }
   
-  /* Allocate speed buffer if needed */
-  if (!speed_buffer || speed_buffer_size < n_samples * 4)
+  /* Allocate speed buffer if needed - fixed size, no pitch dependency */
+  if (!speed_buffer || speed_buffer_size < n_samples)
   {
     free(speed_buffer);
-    speed_buffer_size = n_samples * 4;
+    speed_buffer_size = n_samples;
     speed_buffer = malloc(speed_buffer_size * sizeof(float));
     if (!speed_buffer)
     {
@@ -318,12 +318,11 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
   
   /* STEP 1: Generate speed-controlled audio (tempo only)
    * This determines WHEN samples are played (timeline advancement)
+   * 
+   * CRITICAL: Generate exactly n_samples regardless of pitch!
+   * Pitch will be handled in Stage 2 by resampling these samples.
    */
-  uint32_t speed_samples_needed = (uint32_t)(n_samples * data->pitch_shift) + 4;
-  if (speed_samples_needed > speed_buffer_size)
-  {
-    speed_samples_needed = speed_buffer_size;
-  }
+  uint32_t speed_samples_needed = n_samples;  /* Fixed size - no pitch dependency! */
   
   for (uint32_t i = 0; i < speed_samples_needed; i++)
   {
@@ -386,37 +385,36 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
   
   /* STEP 2: Resample speed-adjusted audio for pitch (frequency only)
    * This determines HOW FAST samples are played (frequency)
+   * 
+   * CRITICAL: Read from the fixed-size speed buffer at pitch-controlled rate
+   * The pitch position must be independent of speed buffer content changes
    */
+  
+  /* Maintain a separate pitch phase that's independent of speed changes */
+  static double independent_pitch_phase = 0.0;
   
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* Read from speed buffer at pitch-controlled rate */
-    uint32_t read_index = (uint32_t)pitch_read_position;
-    double frac = pitch_read_position - read_index;
+    /* Use independent pitch phase that doesn't depend on speed buffer content */
+    uint32_t read_index = (uint32_t)independent_pitch_phase;
+    double frac = independent_pitch_phase - read_index;
     
-    if (read_index < speed_samples_needed - 1)
-    {
-      /* Linear interpolation between samples in speed buffer */
-      buf[i] = speed_buffer[read_index] + 
-               (speed_buffer[read_index + 1] - speed_buffer[read_index]) * frac;
-    }
-    else if (read_index < speed_samples_needed)
-    {
-      buf[i] = speed_buffer[read_index];
-    }
-    else
-    {
-      buf[i] = 0.0f;
-    }
+    /* Always read cyclically from the speed buffer to avoid dependency on buffer content */
+    uint32_t safe_index = read_index % speed_samples_needed;
+    uint32_t next_index = (read_index + 1) % speed_samples_needed;
     
-    /* Advance pitch read position by pitch_shift rate */
-    pitch_read_position += data->pitch_shift;
-  }
-  
-  /* Reset pitch read position if it exceeds buffer */
-  if (pitch_read_position >= speed_samples_needed)
-  {
-    pitch_read_position = fmod(pitch_read_position, (double)speed_samples_needed);
+    /* Linear interpolation with wraparound */
+    buf[i] = speed_buffer[safe_index] + 
+             (speed_buffer[next_index] - speed_buffer[safe_index]) * frac;
+    
+    /* Advance independent pitch phase by pitch_shift rate */
+    independent_pitch_phase += data->pitch_shift;
+    
+    /* Keep phase bounded to prevent overflow */
+    if (independent_pitch_phase >= speed_samples_needed)
+    {
+      independent_pitch_phase -= speed_samples_needed;
+    }
   }
 
   /* Update the global sample position for UI display */
