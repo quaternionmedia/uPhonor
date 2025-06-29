@@ -313,53 +313,41 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     /* INDEPENDENT CONTROL: Speed affects timeline, pitch affects frequency sampling */
     double final_position;
     
-    if (data->pitch_shift == 1.0f)
-    {
-      /* No pitch change - use timeline position (speed only) */
-      final_position = timeline_position;
-    }
-    else if (data->playback_speed == 1.0f)
-    {
-      /* No speed change - use frequency position (pitch only) */
-      final_position = frequency_position;
-    }
-    else
-    {
-      /* CRITICAL FIX: Both changed - speed controls WHERE, pitch controls resampling
-       * 
-       * The key insight: Speed determines the timeline progression through the song,
-       * while pitch determines how we resample at that timeline position.
-       * 
-       * Use timeline position as the BASE (speed control only),
-       * then use pitch to determine resampling rate at that position.
-       */
-      
-      /* Use speed timeline as the base position - this gives us tempo control */
-      final_position = timeline_position;
-      
-      /* Pitch will be handled through resampling in the interpolation step */
-      /* No position modification needed here - pitch affects HOW we read, not WHERE */
-    }
+    /* ALWAYS use speed timeline for position - this ensures CC 74 controls tempo only
+     * Even when speed is 1.0, we still use the speed timeline to maintain independence */
+    final_position = timeline_position;
     
-    /* Read sample at calculated position with pitch-independent interpolation */
+    /* Pitch will ONLY affect resampling in the interpolation step below
+     * This ensures CC 75 never affects the timeline position */
+    
+    /* Read sample at calculated position with independent pitch resampling */
     sf_count_t read_pos = (sf_count_t)final_position;
     double frac = final_position - read_pos;
     
-    /* PITCH RESAMPLING: Apply pitch shift through interpolation offset
-     * This separates pitch from timeline position completely */
-    if (data->pitch_shift != 1.0f && data->playback_speed != 1.0f)
+    /* PITCH RESAMPLING: Apply pitch shift through interpolation modification
+     * This must happen whenever pitch != 1.0, regardless of speed setting */
+    if (data->pitch_shift != 1.0f)
     {
-      /* When both are active: use speed for position, pitch for interpolation rate */
-      double pitch_offset = (frequency_position - timeline_position) * 0.01; /* Small pitch influence */
-      frac += pitch_offset;
-      
-      /* Clamp interpolation fraction */
-      if (frac >= 1.0) 
+      /* Apply pitch as a resampling rate modifier */
+      if (data->playback_speed != 1.0f)
       {
-        read_pos += (sf_count_t)frac;
-        frac = frac - (sf_count_t)frac;
+        /* Both controls active: use pitch difference to modify interpolation */
+        double pitch_influence = (frequency_position - timeline_position) * 0.1;
+        frac += pitch_influence;
       }
-      if (frac < 0.0) 
+      else
+      {
+        /* Only pitch active: apply pitch shift directly to the fractional part */
+        frac *= data->pitch_shift;
+      }
+      
+      /* Handle interpolation overflow/underflow */
+      while (frac >= 1.0) 
+      {
+        read_pos += 1;
+        frac -= 1.0;
+      }
+      while (frac < 0.0) 
       {
         read_pos -= 1;
         frac += 1.0;
