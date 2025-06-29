@@ -92,6 +92,10 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
     sf_seek(data->file, 0, SEEK_SET);
     data->sample_position = 0.0;  /* Reset fractional position for variable speed */
     data->reset_audio = false;
+    
+    /* Reset static positions in the pitch/speed processing */
+    extern void reset_speed_pitch_positions(void);
+    reset_speed_pitch_positions();
   }
 
   /* Read audio data with variable speed playback */
