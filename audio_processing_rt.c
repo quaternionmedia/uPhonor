@@ -269,73 +269,66 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     return read_audio_frames_rt(data, buf, n_samples);
   }
 
-  /* TRULY INDEPENDENT SPEED AND PITCH PROCESSING
+  /* COMPLETELY INDEPENDENT APPROACH
    * 
-   * NEW APPROACH: Read audio at speed, then resample for pitch
-   * 
-   * Speed only affects timeline position (WHERE we are in the song)
-   * Pitch only affects frequency (HOW FAST we play each sample)
+   * Key insight: Speed and pitch must use separate file position tracking
+   * and separate sample reading to avoid any coupling
    */
   
-  static double speed_position = 0.0;     /* Position advanced only by speed */
-  static float *speed_buffer = NULL;      /* Buffer for speed-adjusted audio */
-  static uint32_t speed_buffer_size = 0;
-  static double pitch_read_position = 0.0; /* Pitch reading position */
+  static double master_file_position = 0.0;    /* Master position in the audio file */
+  static double pitch_sample_position = 0.0;  /* Position for pitch resampling */
   static bool initialized = false;
   
   /* Reset static variables when audio is reset */
   if (data->reset_audio || !initialized)
   {
-    speed_position = 0.0;
-    pitch_read_position = 0.0;
+    master_file_position = 0.0;
+    pitch_sample_position = 0.0;
     initialized = true;
-  }
-  
-  /* Allocate speed buffer if needed - fixed size, no pitch dependency */
-  if (!speed_buffer || speed_buffer_size < n_samples)
-  {
-    free(speed_buffer);
-    speed_buffer_size = n_samples;
-    speed_buffer = malloc(speed_buffer_size * sizeof(float));
-    if (!speed_buffer)
-    {
-      /* Memory allocation failed */
-      for (uint32_t i = 0; i < n_samples; i++)
-      {
-        buf[i] = 0.0f;
-      }
-      return n_samples;
-    }
   }
   
   /* Debug output occasionally */
   static uint32_t debug_counter = 0;
   if (++debug_counter >= 1000) {  /* Every ~20 seconds at 48kHz/1024 */
-    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, speed_pos=%.3f", 
-                data->playback_speed, data->pitch_shift, speed_position);
+    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, file_pos=%.3f", 
+                data->playback_speed, data->pitch_shift, master_file_position);
     debug_counter = 0;
   }
   
-  /* STEP 1: Generate speed-controlled audio (tempo only)
-   * This determines WHEN samples are played (timeline advancement)
+  /* DIRECT APPROACH: Read samples directly using independent position calculations
    * 
-   * CRITICAL: Generate exactly n_samples regardless of pitch!
-   * Pitch will be handled in Stage 2 by resampling these samples.
+   * For each output sample, calculate:
+   * 1. WHERE to read from (speed controls timeline)
+   * 2. HOW to resample (pitch controls frequency)
    */
-  uint32_t speed_samples_needed = n_samples;  /* Fixed size - no pitch dependency! */
   
-  for (uint32_t i = 0; i < speed_samples_needed; i++)
+  for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* Calculate current file position based on speed only */
-    double current_file_position = speed_position;
+    /* STEP 1: Calculate base file position (speed control only) */
+    double speed_adjusted_position = master_file_position + (i * data->playback_speed);
     
     /* Wrap around file boundaries */
-    current_file_position = fmod(current_file_position, (double)total_frames);
-    if (current_file_position < 0) current_file_position += total_frames;
+    speed_adjusted_position = fmod(speed_adjusted_position, (double)total_frames);
+    if (speed_adjusted_position < 0) speed_adjusted_position += total_frames;
     
-    /* Read sample at current position */
-    sf_count_t read_pos = (sf_count_t)current_file_position;
-    double frac = current_file_position - read_pos;
+    /* STEP 2: Apply pitch resampling independently */
+    double final_read_position = speed_adjusted_position;
+    
+    /* For pitch != 1.0, we need to read from a different position */
+    if (data->pitch_shift != 1.0f)
+    {
+      /* Pitch resampling: adjust the read position based on pitch */
+      final_read_position = fmod(speed_adjusted_position + (pitch_sample_position * (data->pitch_shift - 1.0)), (double)total_frames);
+      if (final_read_position < 0) final_read_position += total_frames;
+      
+      /* Advance pitch sample position */
+      pitch_sample_position += 1.0;
+      if (pitch_sample_position >= total_frames) pitch_sample_position = 0.0;
+    }
+    
+    /* Read sample at calculated position */
+    sf_count_t read_pos = (sf_count_t)final_read_position;
+    double frac = final_read_position - read_pos;
     
     /* Seek and read with interpolation */
     if (sf_seek(data->file, read_pos, SEEK_SET) == read_pos)
@@ -362,59 +355,29 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
         if (frames_read >= 2 && frac > 0.0)
         {
           /* Linear interpolation */
-          speed_buffer[i] = temp_samples[0] + (temp_samples[1] - temp_samples[0]) * frac;
+          buf[i] = temp_samples[0] + (temp_samples[1] - temp_samples[0]) * frac;
         }
         else
         {
-          speed_buffer[i] = temp_samples[0];
+          buf[i] = temp_samples[0];
         }
       }
       else
       {
-        speed_buffer[i] = 0.0f;
+        buf[i] = 0.0f;
       }
     }
     else
     {
-      speed_buffer[i] = 0.0f;
+      buf[i] = 0.0f;
     }
-    
-    /* Advance position by speed ONLY */
-    speed_position += data->playback_speed;
   }
   
-  /* STEP 2: Resample speed-adjusted audio for pitch (frequency only)
-   * This determines HOW FAST samples are played (frequency)
-   * 
-   * CRITICAL: Read from the fixed-size speed buffer at pitch-controlled rate
-   * The pitch position must be independent of speed buffer content changes
-   */
-  
-  /* Maintain a separate pitch phase that's independent of speed changes */
-  static double independent_pitch_phase = 0.0;
-  
-  for (uint32_t i = 0; i < n_samples; i++)
+  /* Advance master position by speed only */
+  master_file_position += n_samples * data->playback_speed;
+  if (master_file_position >= total_frames)
   {
-    /* Use independent pitch phase that doesn't depend on speed buffer content */
-    uint32_t read_index = (uint32_t)independent_pitch_phase;
-    double frac = independent_pitch_phase - read_index;
-    
-    /* Always read cyclically from the speed buffer to avoid dependency on buffer content */
-    uint32_t safe_index = read_index % speed_samples_needed;
-    uint32_t next_index = (read_index + 1) % speed_samples_needed;
-    
-    /* Linear interpolation with wraparound */
-    buf[i] = speed_buffer[safe_index] + 
-             (speed_buffer[next_index] - speed_buffer[safe_index]) * frac;
-    
-    /* Advance independent pitch phase by pitch_shift rate */
-    independent_pitch_phase += data->pitch_shift;
-    
-    /* Keep phase bounded to prevent overflow */
-    if (independent_pitch_phase >= speed_samples_needed)
-    {
-      independent_pitch_phase -= speed_samples_needed;
-    }
+    master_file_position = fmod(master_file_position, (double)total_frames);
   }
 
   /* Update the global sample position for UI display */
