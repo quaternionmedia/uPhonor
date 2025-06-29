@@ -280,31 +280,25 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
   }
 
   /* Process each output sample */
+  static double pitch_accumulator = 0.0;  /* Tracks pitch-based sample consumption */
+  
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* Step 1: Speed control - how fast do we advance through the file?
-     * This controls ONLY the rate of advancement through file timeline */
+    /* Step 1: Speed control - ONLY affects timeline advancement (tempo)
+     * This determines WHERE in the song we are, but not HOW we sample it */
     double file_timeline_position = virtual_time * data->playback_speed;
+    double base_file_position = file_timeline_position * (double)data->fileinfo.samplerate;
     
-    /* Step 2: Pitch control - how do we sample the file content?
-     * This controls ONLY the frequency at which we read samples
-     * Higher pitch = read samples at higher rate from file
-     * Lower pitch = read samples at lower rate from file
-     * This is completely independent of playback speed */
-    double sampling_position = file_timeline_position * data->pitch_shift;
+    /* Step 2: Pitch control - ONLY affects frequency content sampling
+     * Pitch determines how fast we consume samples for frequency content
+     * This is independent of tempo/timeline position */
     
-    /* Convert to actual file sample index */
-    double file_position = sampling_position * (double)data->fileinfo.samplerate;
+    /* For each output sample, we advance through pitch-shifted content */
+    double pitch_sample_position = base_file_position + pitch_accumulator;
     
     /* Handle file looping */
-    while (file_position >= total_frames)
-    {
-      file_position -= total_frames;
-    }
-    while (file_position < 0)
-    {
-      file_position += total_frames;
-    }
+    double file_position = fmod(pitch_sample_position, (double)total_frames);
+    if (file_position < 0) file_position += total_frames;
     
     sf_count_t sample_index = (sf_count_t)file_position;
     double frac = file_position - sample_index;
@@ -353,15 +347,18 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
       }
     }
 
-    /* Advance virtual time at constant rate (this is key for independence) */
+    /* Advance virtual time at constant rate (this controls tempo only) */
     virtual_time += time_step;
+    
+    /* Advance pitch accumulator (this controls frequency only) */
+    pitch_accumulator += data->pitch_shift - 1.0;  /* Relative to normal pitch */
   }
 
-  /* Update position based on actual speed-controlled advancement */
+  /* Update position based on actual speed-controlled advancement only */
   double new_file_time = virtual_time * data->playback_speed;
   data->sample_position = (sf_count_t)(new_file_time * (double)data->fileinfo.samplerate);
   
-  /* Handle looping */
+  /* Handle looping for speed-controlled position only */
   if (data->sample_position >= total_frames)
   {
     data->sample_position = (sf_count_t)(fmod((double)data->sample_position, (double)total_frames));
