@@ -301,19 +301,26 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     if (data->pitch_shift != 1.0f)
     {
       /* Use pitch to create a cumulative offset that builds over time
-       * This creates the frequency change without affecting tempo */
+       * This creates the frequency change without affecting tempo
+       * 
+       * CRITICAL: Use a separate static variable that is independent of speed */
       static double cumulative_pitch_offset = 0.0;
+      static double last_reset_check = -1.0;
       
-      /* Reset cumulative offset when audio resets */
-      if (data->reset_audio || i == 0) {
-        cumulative_pitch_offset = 0.0;
+      /* Reset cumulative offset when audio resets OR when we detect a position jump */
+      if (data->reset_audio || last_reset_check != file_position) {
+        if (last_reset_check == -1.0 || data->reset_audio) {
+          cumulative_pitch_offset = 0.0;
+        }
+        last_reset_check = file_position;
       }
       
-      /* Add pitch influence - this accumulates over time to create frequency shift */
-      cumulative_pitch_offset += (data->pitch_shift - 1.0f);
+      /* Add pitch influence - this accumulates over time to create frequency shift
+       * Use a fixed increment that doesn't depend on speed */
+      cumulative_pitch_offset += (data->pitch_shift - 1.0f) * 0.01;  /* Fixed rate independent of speed */
       
       /* Apply the cumulative offset with a scaling factor */
-      read_position += cumulative_pitch_offset * 0.5;
+      read_position += cumulative_pitch_offset;
       
       /* Wrap the read position */
       read_position = fmod(read_position, (double)total_frames);
