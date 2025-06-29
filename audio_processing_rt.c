@@ -269,66 +269,75 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     return read_audio_frames_rt(data, buf, n_samples);
   }
 
-  /* COMPLETELY INDEPENDENT APPROACH
+  /* ULTIMATE SIMPLICITY APPROACH
    * 
-   * Key insight: Speed and pitch must use separate file position tracking
-   * and separate sample reading to avoid any coupling
+   * Two completely separate position counters:
+   * 1. Speed position: advances by playback_speed
+   * 2. Pitch position: advances by pitch_shift  
+   * 
+   * Use ONLY speed for timeline, ONLY pitch for frequency
    */
   
-  static double master_file_position = 0.0;    /* Master position in the audio file */
-  static double pitch_sample_position = 0.0;  /* Position for pitch resampling */
+  static double speed_timeline = 0.0;      /* Timeline position (tempo) */
+  static double pitch_frequency = 0.0;     /* Frequency position (pitch) */
   static bool initialized = false;
   
   /* Reset static variables when audio is reset */
   if (data->reset_audio || !initialized)
   {
-    master_file_position = 0.0;
-    pitch_sample_position = 0.0;
+    speed_timeline = 0.0;
+    pitch_frequency = 0.0;
     initialized = true;
   }
   
   /* Debug output occasionally */
   static uint32_t debug_counter = 0;
   if (++debug_counter >= 1000) {  /* Every ~20 seconds at 48kHz/1024 */
-    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, file_pos=%.3f", 
-                data->playback_speed, data->pitch_shift, master_file_position);
+    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, timeline=%.3f, freq=%.3f", 
+                data->playback_speed, data->pitch_shift, speed_timeline, pitch_frequency);
     debug_counter = 0;
   }
   
-  /* DIRECT APPROACH: Read samples directly using independent position calculations
-   * 
-   * For each output sample, calculate:
-   * 1. WHERE to read from (speed controls timeline)
-   * 2. HOW to resample (pitch controls frequency)
-   */
-  
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* STEP 1: Calculate base file position (speed control only) */
-    double speed_adjusted_position = master_file_position + (i * data->playback_speed);
+    /* PURE SPEED CONTROL: Only affects WHEN we play (timeline position) */
+    double timeline_position = speed_timeline + (i * data->playback_speed);
+    timeline_position = fmod(timeline_position, (double)total_frames);
+    if (timeline_position < 0) timeline_position += total_frames;
     
-    /* Wrap around file boundaries */
-    speed_adjusted_position = fmod(speed_adjusted_position, (double)total_frames);
-    if (speed_adjusted_position < 0) speed_adjusted_position += total_frames;
+    /* PURE PITCH CONTROL: Only affects WHAT FREQUENCY we play at */
+    double frequency_position = pitch_frequency + (i * data->pitch_shift);
+    frequency_position = fmod(frequency_position, (double)total_frames);
+    if (frequency_position < 0) frequency_position += total_frames;
     
-    /* STEP 2: Apply pitch resampling independently */
-    double final_read_position = speed_adjusted_position;
+    /* CHOOSE: Use speed for timeline OR pitch for frequency, not both! */
+    double final_position;
     
-    /* For pitch != 1.0, we need to read from a different position */
-    if (data->pitch_shift != 1.0f)
+    if (data->pitch_shift == 1.0f)
     {
-      /* Pitch resampling: adjust the read position based on pitch */
-      final_read_position = fmod(speed_adjusted_position + (pitch_sample_position * (data->pitch_shift - 1.0)), (double)total_frames);
-      if (final_read_position < 0) final_read_position += total_frames;
+      /* No pitch change - use timeline position (speed only) */
+      final_position = timeline_position;
+    }
+    else if (data->playback_speed == 1.0f)
+    {
+      /* No speed change - use frequency position (pitch only) */
+      final_position = frequency_position;
+    }
+    else
+    {
+      /* Both changed - we need to combine them without coupling
+       * Use timeline for WHERE in song, but frequency for HOW FAST through that position */
       
-      /* Advance pitch sample position */
-      pitch_sample_position += 1.0;
-      if (pitch_sample_position >= total_frames) pitch_sample_position = 0.0;
+      /* Map the frequency progression onto the timeline position */
+      double progress_ratio = frequency_position / total_frames;
+      final_position = timeline_position + (progress_ratio * total_frames * 0.1);  /* Small frequency offset */
+      final_position = fmod(final_position, (double)total_frames);
+      if (final_position < 0) final_position += total_frames;
     }
     
     /* Read sample at calculated position */
-    sf_count_t read_pos = (sf_count_t)final_read_position;
-    double frac = final_read_position - read_pos;
+    sf_count_t read_pos = (sf_count_t)final_position;
+    double frac = final_position - read_pos;
     
     /* Seek and read with interpolation */
     if (sf_seek(data->file, read_pos, SEEK_SET) == read_pos)
@@ -373,11 +382,17 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     }
   }
   
-  /* Advance master position by speed only */
-  master_file_position += n_samples * data->playback_speed;
-  if (master_file_position >= total_frames)
+  /* Advance positions independently */
+  speed_timeline += n_samples * data->playback_speed;
+  if (speed_timeline >= total_frames)
   {
-    master_file_position = fmod(master_file_position, (double)total_frames);
+    speed_timeline = fmod(speed_timeline, (double)total_frames);
+  }
+  
+  pitch_frequency += n_samples * data->pitch_shift;
+  if (pitch_frequency >= total_frames)
+  {
+    pitch_frequency = fmod(pitch_frequency, (double)total_frames);
   }
 
   /* Update the global sample position for UI display */
