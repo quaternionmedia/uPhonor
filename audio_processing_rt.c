@@ -258,72 +258,53 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     return n_samples;
   }
 
-  /* ULTRA SIMPLE APPROACH: Two completely separate position trackers
+  /* COMPLETELY INDEPENDENT SPEED AND PITCH CONTROL
    * 
-   * Speed controls WHERE we are in the song (timeline)
-   * Pitch controls HOW FAST we move through that position (frequency)
+   * Speed (CC 74): Controls ONLY the timeline playback rate - where we are in the song
+   * Pitch (CC 75): Controls ONLY the frequency - implemented as resampling step
+   * 
+   * NO COUPLING - these are processed as completely separate operations
    */
   
-  static double speed_position = 0.0;      /* Timeline position - only affected by speed */
-  static double pitch_position = 0.0;      /* Pitch position - only affected by pitch */
+  static double timeline_position = 0.0;    /* Only controlled by speed */
+  static double pitch_accumulator = 0.0;    /* Only used for pitch resampling */
   static bool initialized = false;
   
   /* Reset static variables when audio is reset */
   if (data->reset_audio || !initialized)
   {
-    speed_position = 0.0;
-    pitch_position = 0.0;
+    timeline_position = 0.0;
+    pitch_accumulator = 0.0;
     initialized = true;
   }
   
   /* Debug output occasionally */
   static uint32_t debug_counter = 0;
   if (++debug_counter >= 1000) {  
-    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, speed_pos=%.3f, pitch_pos=%.3f", 
-                data->playback_speed, data->pitch_shift, speed_position, pitch_position);
+    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, timeline_pos=%.3f", 
+                data->playback_speed, data->pitch_shift, timeline_position);
     debug_counter = 0;
   }
   
+  /* STEP 1: Get audio at normal timeline (speed control only) */
+  static float timeline_buffer[1024];
+  
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* STEP 1: Calculate timeline position (SPEED ONLY) */
-    double timeline_pos = speed_position + (i * data->playback_speed);
-    timeline_pos = fmod(timeline_pos, (double)total_frames);
-    if (timeline_pos < 0) timeline_pos += total_frames;
+    /* Calculate position based ONLY on speed */
+    double read_pos = timeline_position + (i * data->playback_speed);
+    read_pos = fmod(read_pos, (double)total_frames);
+    if (read_pos < 0) read_pos += total_frames;
     
-    /* STEP 2: Calculate pitch offset (PITCH ONLY) */
-    double pitch_offset = pitch_position + (i * data->pitch_shift);
-    pitch_offset = fmod(pitch_offset, (double)total_frames);
-    if (pitch_offset < 0) pitch_offset += total_frames;
+    sf_count_t pos = (sf_count_t)read_pos;
+    double frac = read_pos - pos;
     
-    /* STEP 3: ALWAYS use speed for timeline, ALWAYS use pitch independently
-     * This ensures complete separation between speed and pitch controls */
-    double final_read_position;
+    /* Ensure position stays in bounds */
+    if (pos >= total_frames) pos = total_frames - 1;
+    if (pos < 0) pos = 0;
     
-    /* Timeline is ALWAYS controlled by speed only */
-    final_read_position = timeline_pos;
-    
-    /* Apply pitch shift as a SEPARATE modification to the read position */
-    if (data->pitch_shift != 1.0f) {
-      /* Use the difference between pitch and normal progression as an offset */
-      double pitch_difference = pitch_offset - (pitch_position + (i * 1.0));  /* Compare to normal progression */
-      final_read_position += pitch_difference * 0.1;  /* Small pitch influence */
-      
-      /* Wrap the final position */
-      final_read_position = fmod(final_read_position, (double)total_frames);
-      if (final_read_position < 0) final_read_position += total_frames;
-    }
-    
-    /* Read sample at calculated position */
-    sf_count_t read_pos = (sf_count_t)final_read_position;
-    double frac = final_read_position - read_pos;
-    
-    /* Ensure read position stays in bounds */
-    if (read_pos >= total_frames) read_pos = total_frames - 1;
-    if (read_pos < 0) read_pos = 0;
-    
-    /* Seek and read with interpolation */
-    if (sf_seek(data->file, read_pos, SEEK_SET) == read_pos)
+    /* Read sample at speed-controlled position */
+    if (sf_seek(data->file, pos, SEEK_SET) == pos)
     {
       static float temp_samples[8];
       sf_count_t frames_read;
@@ -347,11 +328,53 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
         if (frames_read >= 2 && frac > 0.0)
         {
           /* Linear interpolation */
-          buf[i] = temp_samples[0] + (temp_samples[1] - temp_samples[0]) * frac;
+          timeline_buffer[i] = temp_samples[0] + (temp_samples[1] - temp_samples[0]) * frac;
         }
         else
         {
-          buf[i] = temp_samples[0];
+          timeline_buffer[i] = temp_samples[0];
+        }
+      }
+      else
+      {
+        timeline_buffer[i] = 0.0f;
+      }
+    }
+    else
+    {
+      timeline_buffer[i] = 0.0f;
+    }
+  }
+  
+  /* STEP 2: Apply pitch shift as independent resampling operation */
+  if (data->pitch_shift == 1.0f)
+  {
+    /* No pitch shift - direct copy */
+    for (uint32_t i = 0; i < n_samples; i++)
+    {
+      buf[i] = timeline_buffer[i];
+    }
+  }
+  else
+  {
+    /* Pitch shift via resampling - independent of speed */
+    for (uint32_t i = 0; i < n_samples; i++)
+    {
+      /* Calculate source position for pitch shift */
+      double source_pos = pitch_accumulator + (i / data->pitch_shift);
+      uint32_t src_idx = (uint32_t)source_pos;
+      double frac = source_pos - src_idx;
+      
+      if (src_idx < n_samples)
+      {
+        if (src_idx + 1 < n_samples && frac > 0.0)
+        {
+          /* Linear interpolation for pitch */
+          buf[i] = timeline_buffer[src_idx] + (timeline_buffer[src_idx + 1] - timeline_buffer[src_idx]) * frac;
+        }
+        else
+        {
+          buf[i] = timeline_buffer[src_idx];
         }
       }
       else
@@ -359,24 +382,18 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
         buf[i] = 0.0f;
       }
     }
-    else
-    {
-      buf[i] = 0.0f;
-    }
   }
   
-  /* Advance both positions independently */
-  speed_position += n_samples * data->playback_speed;
-  if (speed_position >= total_frames)
+  /* Advance timeline position based ONLY on speed */
+  timeline_position += n_samples * data->playback_speed;
+  if (timeline_position >= total_frames)
   {
-    speed_position = fmod(speed_position, (double)total_frames);
+    timeline_position = fmod(timeline_position, (double)total_frames);
   }
   
-  pitch_position += n_samples * data->pitch_shift;
-  if (pitch_position >= total_frames)
-  {
-    pitch_position = fmod(pitch_position, (double)total_frames);
-  }
+  /* Update pitch accumulator for next frame */
+  pitch_accumulator += n_samples / data->pitch_shift;
+  pitch_accumulator = fmod(pitch_accumulator, (double)n_samples);
 
   return n_samples;
 }
