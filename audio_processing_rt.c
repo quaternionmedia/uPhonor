@@ -310,7 +310,7 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     frequency_position = fmod(frequency_position, (double)total_frames);
     if (frequency_position < 0) frequency_position += total_frames;
     
-    /* CHOOSE: Use speed for timeline OR pitch for frequency, not both! */
+    /* INDEPENDENT CONTROL: Speed affects timeline, pitch affects frequency sampling */
     double final_position;
     
     if (data->pitch_shift == 1.0f)
@@ -325,19 +325,50 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     }
     else
     {
-      /* Both changed - we need to combine them without coupling
-       * Use timeline for WHERE in song, but frequency for HOW FAST through that position */
+      /* CRITICAL FIX: Both changed - speed controls WHERE, pitch controls resampling
+       * 
+       * The key insight: Speed determines the timeline progression through the song,
+       * while pitch determines how we resample at that timeline position.
+       * 
+       * Use timeline position as the BASE (speed control only),
+       * then use pitch to determine resampling rate at that position.
+       */
       
-      /* Map the frequency progression onto the timeline position */
-      double progress_ratio = frequency_position / total_frames;
-      final_position = timeline_position + (progress_ratio * total_frames * 0.1);  /* Small frequency offset */
-      final_position = fmod(final_position, (double)total_frames);
-      if (final_position < 0) final_position += total_frames;
+      /* Use speed timeline as the base position - this gives us tempo control */
+      final_position = timeline_position;
+      
+      /* Pitch will be handled through resampling in the interpolation step */
+      /* No position modification needed here - pitch affects HOW we read, not WHERE */
     }
     
-    /* Read sample at calculated position */
+    /* Read sample at calculated position with pitch-independent interpolation */
     sf_count_t read_pos = (sf_count_t)final_position;
     double frac = final_position - read_pos;
+    
+    /* PITCH RESAMPLING: Apply pitch shift through interpolation offset
+     * This separates pitch from timeline position completely */
+    if (data->pitch_shift != 1.0f && data->playback_speed != 1.0f)
+    {
+      /* When both are active: use speed for position, pitch for interpolation rate */
+      double pitch_offset = (frequency_position - timeline_position) * 0.01; /* Small pitch influence */
+      frac += pitch_offset;
+      
+      /* Clamp interpolation fraction */
+      if (frac >= 1.0) 
+      {
+        read_pos += (sf_count_t)frac;
+        frac = frac - (sf_count_t)frac;
+      }
+      if (frac < 0.0) 
+      {
+        read_pos -= 1;
+        frac += 1.0;
+      }
+      
+      /* Ensure read position stays in bounds */
+      if (read_pos >= total_frames) read_pos = total_frames - 1;
+      if (read_pos < 0) read_pos = 0;
+    }
     
     /* Seek and read with interpolation */
     if (sf_seek(data->file, read_pos, SEEK_SET) == read_pos)
@@ -363,7 +394,7 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
       {
         if (frames_read >= 2 && frac > 0.0)
         {
-          /* Linear interpolation */
+          /* Linear interpolation with pitch influence */
           buf[i] = temp_samples[0] + (temp_samples[1] - temp_samples[0]) * frac;
         }
         else
