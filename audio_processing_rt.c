@@ -231,13 +231,8 @@ sf_count_t read_audio_frames_variable_speed_rt(struct data *data, float *buf, ui
     data->pitch_shift = 1.0f;
   }
 
-  if (data->playback_speed == 1.0f && data->pitch_shift == 1.0f)
-  {
-    /* Normal speed and pitch - use the optimized path */
-    return read_audio_frames_rt(data, buf, n_samples);
-  }
-
-  /* Independent speed and pitch control */
+  /* ALWAYS use independent speed and pitch control - no optimized path
+   * This ensures CC 74 and CC 75 always work independently */
   return read_audio_frames_variable_speed_pitch_rt(data, buf, n_samples);
 }
 
@@ -287,6 +282,10 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     debug_counter = 0;
   }
   
+  /* CRITICAL DEBUG: Add debug for pitch offset to see if it's working */
+  static uint32_t pitch_debug_counter = 0;
+  static double last_cumulative_pitch_offset = 0.0;
+  
   for (uint32_t i = 0; i < n_samples; i++)
   {
     /* STEP 1: Calculate file position based ONLY on speed */
@@ -301,25 +300,27 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     if (data->pitch_shift != 1.0f)
     {
       /* Use pitch to create a cumulative offset that builds over time
-       * This creates the frequency change without affecting tempo
-       * 
-       * CRITICAL: Use a separate static variable that is independent of speed */
+       * This creates the frequency change without affecting tempo */
       static double cumulative_pitch_offset = 0.0;
-      static double last_reset_check = -1.0;
       
-      /* Reset cumulative offset when audio resets OR when we detect a position jump */
-      if (data->reset_audio || last_reset_check != file_position) {
-        if (last_reset_check == -1.0 || data->reset_audio) {
-          cumulative_pitch_offset = 0.0;
-        }
-        last_reset_check = file_position;
+      /* Reset cumulative offset ONLY when audio is explicitly reset */
+      if (data->reset_audio && i == 0) {
+        cumulative_pitch_offset = 0.0;
       }
       
       /* Add pitch influence - this accumulates over time to create frequency shift
        * Use a fixed increment that doesn't depend on speed */
-      cumulative_pitch_offset += (data->pitch_shift - 1.0f) * 0.01;  /* Fixed rate independent of speed */
+      cumulative_pitch_offset += (data->pitch_shift - 1.0f) * 0.5;  /* Larger multiplier for more effect */
       
-      /* Apply the cumulative offset with a scaling factor */
+      /* Debug pitch offset occasionally */
+      if (++pitch_debug_counter >= 5000) {
+        pw_log_info("PITCH DEBUG: offset=%.3f, pitch_shift=%.3f", 
+                    cumulative_pitch_offset, data->pitch_shift);
+        pitch_debug_counter = 0;
+      }
+      last_cumulative_pitch_offset = cumulative_pitch_offset;
+      
+      /* Apply the cumulative offset */
       read_position += cumulative_pitch_offset;
       
       /* Wrap the read position */
