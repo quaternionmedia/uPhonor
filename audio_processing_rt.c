@@ -290,48 +290,53 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
   /* Debug output occasionally */
   static uint32_t debug_counter = 0;
   if (++debug_counter >= 1000) {  
-    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, read_pos=%.3f, buf_size=%u, out_accum=%.3f", 
-                data->playback_speed, data->pitch_shift, read_position, input_buffer_size, output_sample_accumulator);
+    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, buf_size=%u, out_accum=%.3f", 
+                data->playback_speed, data->pitch_shift, input_buffer_size, output_sample_accumulator);
     debug_counter = 0;
   }
   
-  /* True time-stretching: Read at constant rate, output at variable rate */
+  /* True time-stretching: Sequential file reading with output resampling */
   
-  /* Fill input buffer at constant rate (completely independent of speed) */
+  /* Fill input buffer by reading sequentially from file (no seeking) */
   if (input_buffer_size < 2048) {
-    /* Read more data into buffer at CONSTANT rate - no speed influence at all */
+    /* Read sequentially from current file position - no speed influence */
     sf_count_t samples_to_read = 2048 - input_buffer_size;
-    sf_count_t file_pos = (sf_count_t)read_position;  /* Use separate read position */
+    float temp_samples[2048];
+    sf_count_t read_count;
     
-    if (file_pos >= total_frames) file_pos = total_frames - 1;
-    if (file_pos < 0) file_pos = 0;
-    
-    if (sf_seek(data->file, file_pos, SEEK_SET) == file_pos) {
-      float temp_samples[2048];
-      sf_count_t read_count;
-      
-      if (data->fileinfo.channels == 1) {
-        read_count = sf_readf_float(data->file, temp_samples, samples_to_read);
-      } else {
-        float multi_samples[4096];
-        read_count = sf_readf_float(data->file, multi_samples, samples_to_read);
-        for (sf_count_t j = 0; j < read_count; j++) {
-          temp_samples[j] = multi_samples[j * data->fileinfo.channels];
-        }
-      }
-      
-      /* Copy to input buffer */
+    if (data->fileinfo.channels == 1) {
+      read_count = sf_readf_float(data->file, temp_samples, samples_to_read);
+    } else {
+      float multi_samples[4096];
+      read_count = sf_readf_float(data->file, multi_samples, samples_to_read);
       for (sf_count_t j = 0; j < read_count; j++) {
-        input_buffer[input_buffer_size + j] = temp_samples[j];
-      }
-      input_buffer_size += read_count;
-      
-      /* Advance read position at CONSTANT rate (always 1.0 - no speed influence) */
-      read_position += read_count;
-      if (read_position >= total_frames) {
-        read_position = fmod(read_position, (double)total_frames);
+        temp_samples[j] = multi_samples[j * data->fileinfo.channels];
       }
     }
+    
+    /* Handle end of file - loop back to beginning */
+    if (read_count < samples_to_read) {
+      sf_seek(data->file, 0, SEEK_SET);
+      sf_count_t remaining = samples_to_read - read_count;
+      
+      if (data->fileinfo.channels == 1) {
+        sf_count_t additional = sf_readf_float(data->file, &temp_samples[read_count], remaining);
+        read_count += additional;
+      } else {
+        float multi_samples[4096];
+        sf_count_t additional = sf_readf_float(data->file, multi_samples, remaining);
+        for (sf_count_t j = 0; j < additional; j++) {
+          temp_samples[read_count + j] = multi_samples[j * data->fileinfo.channels];
+        }
+        read_count += additional;
+      }
+    }
+    
+    /* Copy to input buffer */
+    for (sf_count_t j = 0; j < read_count; j++) {
+      input_buffer[input_buffer_size + j] = temp_samples[j];
+    }
+    input_buffer_size += read_count;
   }
   
   /* Generate output samples by resampling the input buffer based on speed */
