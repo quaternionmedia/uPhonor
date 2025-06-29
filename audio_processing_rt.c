@@ -328,18 +328,9 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
      * This must happen whenever pitch != 1.0, regardless of speed setting */
     if (data->pitch_shift != 1.0f)
     {
-      /* Apply pitch as a resampling rate modifier */
-      if (data->playback_speed != 1.0f)
-      {
-        /* Both controls active: use pitch difference to modify interpolation */
-        double pitch_influence = (frequency_position - timeline_position) * 0.1;
-        frac += pitch_influence;
-      }
-      else
-      {
-        /* Only pitch active: apply pitch shift directly to the fractional part */
-        frac *= data->pitch_shift;
-      }
+      /* ALWAYS apply pitch shift the same way, regardless of speed
+       * Use the pitch_shift value directly to modify the interpolation fraction */
+      frac *= data->pitch_shift;
       
       /* Handle interpolation overflow/underflow */
       while (frac >= 1.0) 
