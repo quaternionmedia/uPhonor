@@ -268,6 +268,10 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
   static double read_position = 0.0;     /* New: separate read position */
   static double output_position = 0.0;   /* New: separate output position */
   static double fractional_position = 0.0; /* New: fractional position for time-stretching */
+  static float input_buffer[4096];       /* Buffer for constant-rate reading */
+  static uint32_t input_buffer_size = 0;
+  static uint32_t input_read_pos = 0;    /* Position in input buffer */
+  static double output_sample_accumulator = 0.0;
   static bool initialized = false;
   
   /* Reset static variables when audio is reset */
@@ -277,76 +281,96 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     read_position = 0.0;           /* Reset read position too */
     output_position = 0.0;         /* Reset output position too */
     fractional_position = 0.0;     /* Reset fractional position too */
+    input_buffer_size = 0;         /* Reset buffer */
+    input_read_pos = 0;            /* Reset buffer read position */
+    output_sample_accumulator = 0.0;
     initialized = true;
   }
   
   /* Debug output occasionally */
   static uint32_t debug_counter = 0;
   if (++debug_counter >= 1000) {  
-    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, frac_pos=%.3f", 
-                data->playback_speed, data->pitch_shift, fractional_position);
+    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, frac_pos=%.3f, buf_size=%u", 
+                data->playback_speed, data->pitch_shift, fractional_position, input_buffer_size);
     debug_counter = 0;
   }
   
-  /* Time-stretching: Use fractional positioning to control tempo without pitch shift */
+  /* True time-stretching: Read at constant rate, output at variable rate */
   
-  for (uint32_t i = 0; i < n_samples; i++)
-  {
-    /* Calculate file position based on fractional positioning
-     * This allows us to stretch time without changing pitch */
-    double file_read_pos = fractional_position;
-    file_read_pos = fmod(file_read_pos, (double)total_frames);
-    if (file_read_pos < 0) file_read_pos += total_frames;
-    
-    /* Read sample at the fractional position */
-    sf_count_t file_pos = (sf_count_t)file_read_pos;
-    double fractional = file_read_pos - file_pos;
+  /* Fill input buffer at constant rate (no speed influence) */
+  if (input_buffer_size < 2048) {
+    /* Read more data into buffer at normal rate */
+    sf_count_t samples_to_read = 2048 - input_buffer_size;
+    sf_count_t file_pos = (sf_count_t)fractional_position;
     
     if (file_pos >= total_frames) file_pos = total_frames - 1;
     if (file_pos < 0) file_pos = 0;
     
-    /* Read from file with interpolation */
-    float raw_sample = 0.0f;
-    if (sf_seek(data->file, file_pos, SEEK_SET) == file_pos)
-    {
-      float samples[4];
+    if (sf_seek(data->file, file_pos, SEEK_SET) == file_pos) {
+      float temp_samples[2048];
       sf_count_t read_count;
       
-      if (data->fileinfo.channels == 1)
-      {
-        read_count = sf_readf_float(data->file, samples, 2);
-      }
-      else
-      {
-        float multi_samples[8];
-        read_count = sf_readf_float(data->file, multi_samples, 2);
-        for (int j = 0; j < read_count; j++)
-        {
-          samples[j] = multi_samples[j * data->fileinfo.channels];
+      if (data->fileinfo.channels == 1) {
+        read_count = sf_readf_float(data->file, temp_samples, samples_to_read);
+      } else {
+        float multi_samples[4096];
+        read_count = sf_readf_float(data->file, multi_samples, samples_to_read);
+        for (sf_count_t j = 0; j < read_count; j++) {
+          temp_samples[j] = multi_samples[j * data->fileinfo.channels];
         }
       }
       
-      if (read_count >= 1)
-      {
-        if (read_count >= 2 && fractional > 0.0)
-        {
-          raw_sample = samples[0] + (samples[1] - samples[0]) * fractional;
-        }
-        else
-        {
-          raw_sample = samples[0];
-        }
+      /* Copy to input buffer */
+      for (sf_count_t j = 0; j < read_count; j++) {
+        input_buffer[input_buffer_size + j] = temp_samples[j];
+      }
+      input_buffer_size += read_count;
+      
+      /* Advance file position at constant rate */
+      fractional_position += read_count;
+      if (fractional_position >= total_frames) {
+        fractional_position = fmod(fractional_position, (double)total_frames);
       }
     }
-    
-    /* Store the sample */
-    buf[i] = raw_sample;
-    
-    /* Advance fractional position by speed amount
-     * Speed > 1.0 = faster playback (skips samples)
-     * Speed < 1.0 = slower playback (repeats samples)
-     * This creates tempo change without pitch change */
-    fractional_position += data->playback_speed;
+  }
+  
+  /* Generate output samples by resampling the input buffer based on speed */
+  for (uint32_t i = 0; i < n_samples; i++) {
+    if (input_buffer_size > 1 && input_read_pos < input_buffer_size - 1) {
+      /* Interpolate between samples in the input buffer */
+      uint32_t pos = (uint32_t)output_sample_accumulator;
+      double frac = output_sample_accumulator - pos;
+      
+      if (pos + 1 < input_buffer_size) {
+        buf[i] = input_buffer[pos] + (input_buffer[pos + 1] - input_buffer[pos]) * frac;
+      } else {
+        buf[i] = input_buffer[pos];
+      }
+      
+      /* Advance output accumulator by 1/speed
+       * speed > 1.0 = advance slower through input (faster output)
+       * speed < 1.0 = advance faster through input (slower output) */
+      output_sample_accumulator += (1.0 / data->playback_speed);
+      
+      /* If we've consumed input samples, shift buffer */
+      if ((uint32_t)output_sample_accumulator >= input_buffer_size / 2) {
+        uint32_t consumed = (uint32_t)output_sample_accumulator;
+        if (consumed < input_buffer_size) {
+          /* Shift remaining samples to beginning */
+          for (uint32_t j = 0; j < input_buffer_size - consumed; j++) {
+            input_buffer[j] = input_buffer[j + consumed];
+          }
+          input_buffer_size -= consumed;
+          output_sample_accumulator -= consumed;
+        } else {
+          /* Reset buffer */
+          input_buffer_size = 0;
+          output_sample_accumulator = 0.0;
+        }
+      }
+    } else {
+      buf[i] = 0.0f; /* Silence if no input data */
+    }
   }
   
   /* Apply pitch shift as PURE POST-PROCESSING - no file operations involved
@@ -376,11 +400,8 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
   /* Timeline position is now advanced within the loop for time-stretching
    * No additional advancement needed here */
   
-  /* Handle file looping for fractional position */
-  if (fractional_position >= total_frames)
-  {
-    fractional_position = fmod(fractional_position, (double)total_frames);
-  }
+  /* No additional file position handling needed - 
+   * fractional_position is advanced in the buffer filling logic */
 
   return n_samples;
 }
