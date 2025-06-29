@@ -258,86 +258,65 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     return n_samples;
   }
 
-  /* SIMPLE INDEPENDENT APPROACH
+  /* ULTRA SIMPLE APPROACH: Two completely separate position trackers
    * 
-   * Use a single position that advances by speed only.
-   * Apply pitch as a separate resampling factor.
+   * Speed controls WHERE we are in the song (timeline)
+   * Pitch controls HOW FAST we move through that position (frequency)
    */
   
-  static double file_position = 0.0;       /* Current position in file (speed only) */
+  static double speed_position = 0.0;      /* Timeline position - only affected by speed */
+  static double pitch_position = 0.0;      /* Pitch position - only affected by pitch */
   static bool initialized = false;
   
   /* Reset static variables when audio is reset */
   if (data->reset_audio || !initialized)
   {
-    file_position = 0.0;
+    speed_position = 0.0;
+    pitch_position = 0.0;
     initialized = true;
   }
   
   /* Debug output occasionally */
   static uint32_t debug_counter = 0;
-  if (++debug_counter >= 1000) {  /* Every ~20 seconds at 48kHz/1024 */
-    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, position=%.3f", 
-                data->playback_speed, data->pitch_shift, file_position);
+  if (++debug_counter >= 1000) {  
+    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, speed_pos=%.3f, pitch_pos=%.3f", 
+                data->playback_speed, data->pitch_shift, speed_position, pitch_position);
     debug_counter = 0;
   }
   
-  /* CRITICAL DEBUG: Add debug for pitch offset to see if it's working */
-  static uint32_t pitch_debug_counter = 0;
-  static double last_cumulative_pitch_offset = 0.0;
-  
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* STEP 1: Calculate file position based ONLY on speed */
-    double current_position = file_position + (i * data->playback_speed);
-    current_position = fmod(current_position, (double)total_frames);
-    if (current_position < 0) current_position += total_frames;
+    /* STEP 1: Calculate timeline position (SPEED ONLY) */
+    double timeline_pos = speed_position + (i * data->playback_speed);
+    timeline_pos = fmod(timeline_pos, (double)total_frames);
+    if (timeline_pos < 0) timeline_pos += total_frames;
     
-    /* STEP 2: Apply pitch shift ONLY to the reading, not the position */
-    double read_position = current_position;
+    /* STEP 2: Calculate pitch offset (PITCH ONLY) */
+    double pitch_offset = pitch_position + (i * data->pitch_shift);
+    pitch_offset = fmod(pitch_offset, (double)total_frames);
+    if (pitch_offset < 0) pitch_offset += total_frames;
     
-    /* If pitch != 1.0, modify where we read from without affecting timeline */
-    if (data->pitch_shift != 1.0f)
-    {
-      /* Use pitch to create a cumulative offset that builds over time
-       * This creates the frequency change without affecting tempo
-       * 
-       * CRITICAL: Use a completely independent accumulator that only depends on samples processed */
-      static double cumulative_pitch_offset = 0.0;
-      static uint32_t total_samples_processed = 0;
+    /* STEP 3: ALWAYS use speed for timeline, ALWAYS use pitch independently
+     * This ensures complete separation between speed and pitch controls */
+    double final_read_position;
+    
+    /* Timeline is ALWAYS controlled by speed only */
+    final_read_position = timeline_pos;
+    
+    /* Apply pitch shift as a SEPARATE modification to the read position */
+    if (data->pitch_shift != 1.0f) {
+      /* Use the difference between pitch and normal progression as an offset */
+      double pitch_difference = pitch_offset - (pitch_position + (i * 1.0));  /* Compare to normal progression */
+      final_read_position += pitch_difference * 0.1;  /* Small pitch influence */
       
-      /* Reset cumulative offset ONLY when audio is explicitly reset */
-      if (data->reset_audio && i == 0) {
-        cumulative_pitch_offset = 0.0;
-        total_samples_processed = 0;
-      }
-      
-      /* Increment sample counter regardless of speed */
-      total_samples_processed++;
-      
-      /* Add pitch influence based ONLY on samples processed, not speed
-       * This ensures pitch accumulation is completely independent of playback speed */
-      cumulative_pitch_offset = total_samples_processed * (data->pitch_shift - 1.0f) * 0.0001;
-      
-      /* Debug pitch offset occasionally */
-      if (++pitch_debug_counter >= 5000) {
-        pw_log_info("PITCH DEBUG: offset=%.3f, pitch_shift=%.3f, samples=%u", 
-                    cumulative_pitch_offset, data->pitch_shift, total_samples_processed);
-        pitch_debug_counter = 0;
-      }
-      last_cumulative_pitch_offset = cumulative_pitch_offset;
-      
-      /* Apply the cumulative offset */
-      read_position += cumulative_pitch_offset;
-      
-      /* Wrap the read position */
-      read_position = fmod(read_position, (double)total_frames);
-      if (read_position < 0) read_position += total_frames;
+      /* Wrap the final position */
+      final_read_position = fmod(final_read_position, (double)total_frames);
+      if (final_read_position < 0) final_read_position += total_frames;
     }
     
     /* Read sample at calculated position */
-    sf_count_t read_pos = (sf_count_t)read_position;
-    double frac = read_position - read_pos;
+    sf_count_t read_pos = (sf_count_t)final_read_position;
+    double frac = final_read_position - read_pos;
     
     /* Ensure read position stays in bounds */
     if (read_pos >= total_frames) read_pos = total_frames - 1;
@@ -386,14 +365,18 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     }
   }
   
-  /* Advance file position by speed only - pitch never affects this */
-  file_position += n_samples * data->playback_speed;
-  if (file_position >= total_frames)
+  /* Advance both positions independently */
+  speed_position += n_samples * data->playback_speed;
+  if (speed_position >= total_frames)
   {
-    file_position = fmod(file_position, (double)total_frames);
+    speed_position = fmod(speed_position, (double)total_frames);
   }
-
-  /* Do NOT update data->sample_position here as it might interfere with pitch calculation */
+  
+  pitch_position += n_samples * data->pitch_shift;
+  if (pitch_position >= total_frames)
+  {
+    pitch_position = fmod(pitch_position, (double)total_frames);
+  }
 
   return n_samples;
 }
