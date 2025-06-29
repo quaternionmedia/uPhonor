@@ -300,9 +300,20 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     /* If pitch != 1.0, modify where we read from without affecting timeline */
     if (data->pitch_shift != 1.0f)
     {
-      /* Use pitch to create a local offset for resampling */
-      double pitch_offset = (i * (data->pitch_shift - 1.0f)) * 0.1;
-      read_position += pitch_offset;
+      /* Use pitch to create a cumulative offset that builds over time
+       * This creates the frequency change without affecting tempo */
+      static double cumulative_pitch_offset = 0.0;
+      
+      /* Reset cumulative offset when audio resets */
+      if (data->reset_audio || i == 0) {
+        cumulative_pitch_offset = 0.0;
+      }
+      
+      /* Add pitch influence - this accumulates over time to create frequency shift */
+      cumulative_pitch_offset += (data->pitch_shift - 1.0f);
+      
+      /* Apply the cumulative offset with a scaling factor */
+      read_position += cumulative_pitch_offset * 0.5;
       
       /* Wrap the read position */
       read_position = fmod(read_position, (double)total_frames);
