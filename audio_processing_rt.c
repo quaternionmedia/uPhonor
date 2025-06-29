@@ -267,14 +267,12 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
    */
   
   static double timeline_position = 0.0;    /* Only controlled by speed */
-  static double pitch_accumulator = 0.0;    /* Only used for pitch resampling */
   static bool initialized = false;
   
   /* Reset static variables when audio is reset */
   if (data->reset_audio || !initialized)
   {
     timeline_position = 0.0;
-    pitch_accumulator = 0.0;
     initialized = true;
   }
   
@@ -286,9 +284,17 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     debug_counter = 0;
   }
   
-  /* STEP 1: Get audio at normal timeline (speed control only) */
-  static float timeline_buffer[1024];
+  /* Allocate timeline buffer for this frame size */
+  float *timeline_buffer = malloc(n_samples * sizeof(float));
+  if (!timeline_buffer) {
+    /* Fallback to silence on allocation failure */
+    for (uint32_t i = 0; i < n_samples; i++) {
+      buf[i] = 0.0f;
+    }
+    return n_samples;
+  }
   
+  /* STEP 1: Read audio at speed-controlled timeline positions */
   for (uint32_t i = 0; i < n_samples; i++)
   {
     /* Calculate position based ONLY on speed */
@@ -346,43 +352,43 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     }
   }
   
-  /* STEP 2: Apply pitch shift as independent resampling operation */
-  if (data->pitch_shift == 1.0f)
+  /* STEP 2: Apply pitch shift as completely independent resampling */
+  for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* No pitch shift - direct copy */
-    for (uint32_t i = 0; i < n_samples; i++)
+    if (data->pitch_shift == 1.0f)
     {
+      /* No pitch shift - direct copy */
       buf[i] = timeline_buffer[i];
     }
-  }
-  else
-  {
-    /* Pitch shift via resampling - independent of speed */
-    for (uint32_t i = 0; i < n_samples; i++)
+    else
     {
-      /* Calculate source position for pitch shift */
-      double source_pos = pitch_accumulator + (i / data->pitch_shift);
-      uint32_t src_idx = (uint32_t)source_pos;
-      double frac = source_pos - src_idx;
+      /* Pitch shift: resample the timeline buffer independently */
+      double virtual_pos = i / data->pitch_shift;  /* Virtual position in timeline buffer */
+      uint32_t base_idx = (uint32_t)virtual_pos;
+      double frac = virtual_pos - base_idx;
       
-      if (src_idx < n_samples)
+      if (base_idx < n_samples)
       {
-        if (src_idx + 1 < n_samples && frac > 0.0)
+        if (base_idx + 1 < n_samples && frac > 0.0)
         {
-          /* Linear interpolation for pitch */
-          buf[i] = timeline_buffer[src_idx] + (timeline_buffer[src_idx + 1] - timeline_buffer[src_idx]) * frac;
+          /* Linear interpolation for smooth pitch shift */
+          buf[i] = timeline_buffer[base_idx] + (timeline_buffer[base_idx + 1] - timeline_buffer[base_idx]) * frac;
         }
         else
         {
-          buf[i] = timeline_buffer[src_idx];
+          buf[i] = timeline_buffer[base_idx];
         }
       }
       else
       {
+        /* Beyond buffer - could repeat or use silence */
         buf[i] = 0.0f;
       }
     }
   }
+  
+  /* Clean up */
+  free(timeline_buffer);
   
   /* Advance timeline position based ONLY on speed */
   timeline_position += n_samples * data->playback_speed;
@@ -390,10 +396,6 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
   {
     timeline_position = fmod(timeline_position, (double)total_frames);
   }
-  
-  /* Update pitch accumulator for next frame */
-  pitch_accumulator += n_samples / data->pitch_shift;
-  pitch_accumulator = fmod(pitch_accumulator, (double)n_samples);
 
   return n_samples;
 }
