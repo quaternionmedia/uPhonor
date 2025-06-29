@@ -300,22 +300,29 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     if (data->pitch_shift != 1.0f)
     {
       /* Use pitch to create a cumulative offset that builds over time
-       * This creates the frequency change without affecting tempo */
+       * This creates the frequency change without affecting tempo
+       * 
+       * CRITICAL: Use a completely independent accumulator that only depends on samples processed */
       static double cumulative_pitch_offset = 0.0;
+      static uint32_t total_samples_processed = 0;
       
       /* Reset cumulative offset ONLY when audio is explicitly reset */
       if (data->reset_audio && i == 0) {
         cumulative_pitch_offset = 0.0;
+        total_samples_processed = 0;
       }
       
-      /* Add pitch influence - this accumulates over time to create frequency shift
-       * Use a fixed increment that doesn't depend on speed */
-      cumulative_pitch_offset += (data->pitch_shift - 1.0f) * 0.5;  /* Larger multiplier for more effect */
+      /* Increment sample counter regardless of speed */
+      total_samples_processed++;
+      
+      /* Add pitch influence based ONLY on samples processed, not speed
+       * This ensures pitch accumulation is completely independent of playback speed */
+      cumulative_pitch_offset = total_samples_processed * (data->pitch_shift - 1.0f) * 0.0001;
       
       /* Debug pitch offset occasionally */
       if (++pitch_debug_counter >= 5000) {
-        pw_log_info("PITCH DEBUG: offset=%.3f, pitch_shift=%.3f", 
-                    cumulative_pitch_offset, data->pitch_shift);
+        pw_log_info("PITCH DEBUG: offset=%.3f, pitch_shift=%.3f, samples=%u", 
+                    cumulative_pitch_offset, data->pitch_shift, total_samples_processed);
         pitch_debug_counter = 0;
       }
       last_cumulative_pitch_offset = cumulative_pitch_offset;
@@ -386,12 +393,7 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     file_position = fmod(file_position, (double)total_frames);
   }
 
-  /* Update the global sample position for UI display */
-  data->sample_position += n_samples;
-  if (data->sample_position >= total_frames)
-  {
-    data->sample_position = fmod(data->sample_position, (double)total_frames);
-  }
+  /* Do NOT update data->sample_position here as it might interfere with pitch calculation */
 
   return n_samples;
 }
