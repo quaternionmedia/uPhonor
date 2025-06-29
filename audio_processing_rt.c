@@ -290,18 +290,18 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
   /* Debug output occasionally */
   static uint32_t debug_counter = 0;
   if (++debug_counter >= 1000) {  
-    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, frac_pos=%.3f, buf_size=%u", 
-                data->playback_speed, data->pitch_shift, fractional_position, input_buffer_size);
+    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, read_pos=%.3f, buf_size=%u, out_accum=%.3f", 
+                data->playback_speed, data->pitch_shift, read_position, input_buffer_size, output_sample_accumulator);
     debug_counter = 0;
   }
   
   /* True time-stretching: Read at constant rate, output at variable rate */
   
-  /* Fill input buffer at constant rate (no speed influence) */
+  /* Fill input buffer at constant rate (completely independent of speed) */
   if (input_buffer_size < 2048) {
-    /* Read more data into buffer at normal rate */
+    /* Read more data into buffer at CONSTANT rate - no speed influence at all */
     sf_count_t samples_to_read = 2048 - input_buffer_size;
-    sf_count_t file_pos = (sf_count_t)fractional_position;
+    sf_count_t file_pos = (sf_count_t)read_position;  /* Use separate read position */
     
     if (file_pos >= total_frames) file_pos = total_frames - 1;
     if (file_pos < 0) file_pos = 0;
@@ -326,31 +326,33 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
       }
       input_buffer_size += read_count;
       
-      /* Advance file position at constant rate */
-      fractional_position += read_count;
-      if (fractional_position >= total_frames) {
-        fractional_position = fmod(fractional_position, (double)total_frames);
+      /* Advance read position at CONSTANT rate (always 1.0 - no speed influence) */
+      read_position += read_count;
+      if (read_position >= total_frames) {
+        read_position = fmod(read_position, (double)total_frames);
       }
     }
   }
   
   /* Generate output samples by resampling the input buffer based on speed */
   for (uint32_t i = 0; i < n_samples; i++) {
-    if (input_buffer_size > 1 && input_read_pos < input_buffer_size - 1) {
+    if (input_buffer_size > 1) {
       /* Interpolate between samples in the input buffer */
       uint32_t pos = (uint32_t)output_sample_accumulator;
       double frac = output_sample_accumulator - pos;
       
       if (pos + 1 < input_buffer_size) {
         buf[i] = input_buffer[pos] + (input_buffer[pos + 1] - input_buffer[pos]) * frac;
-      } else {
+      } else if (pos < input_buffer_size) {
         buf[i] = input_buffer[pos];
+      } else {
+        buf[i] = 0.0f;
       }
       
-      /* Advance output accumulator by 1/speed
-       * speed > 1.0 = advance slower through input (faster output)
-       * speed < 1.0 = advance faster through input (slower output) */
-      output_sample_accumulator += (1.0 / data->playback_speed);
+      /* Advance output accumulator by speed amount (corrected logic)
+       * speed > 1.0 = advance faster through input (faster tempo)
+       * speed < 1.0 = advance slower through input (slower tempo) */
+      output_sample_accumulator += data->playback_speed;
       
       /* If we've consumed input samples, shift buffer */
       if ((uint32_t)output_sample_accumulator >= input_buffer_size / 2) {
