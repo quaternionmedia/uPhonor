@@ -24,9 +24,9 @@ int main(int argc, char *argv[])
   data.record_file = NULL;
   data.record_filename = NULL;
 
-  data.volume = 1.0f; // Default volume level
+  data.volume = 1.0f;         // Default volume level
   data.playback_speed = 1.0f; // Default normal speed
-  data.pitch_shift = 1.0f; // Default normal pitch
+  data.pitch_shift = 1.0f;    // Default normal pitch
   data.sample_position = 0.0; // Initialize fractional sample position
 
   data.current_state = HOLO_STATE_IDLE;

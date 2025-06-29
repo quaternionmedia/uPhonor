@@ -97,9 +97,9 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   if (data->reset_audio)
   {
     sf_seek(data->file, 0, SEEK_SET);
-    data->sample_position = 0.0;  /* Reset fractional position for variable speed */
+    data->sample_position = 0.0; /* Reset fractional position for variable speed */
     data->reset_audio = false;
-    
+
     /* Reset static positions in the pitch/speed processing */
     extern void reset_speed_pitch_positions(void);
     reset_speed_pitch_positions();
@@ -258,157 +258,74 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     return n_samples;
   }
 
-  /* RADICAL SEPARATION: Speed and pitch are COMPLETELY independent operations
-   * 
-   * Speed ONLY affects timeline advancement
-   * Pitch is applied as pure post-processing with NO file reading involvement
-   */
-  
-  static double timeline_position = 0.0;
-  static double read_position = 0.0;     /* New: separate read position */
-  static double output_position = 0.0;   /* New: separate output position */
-  static double fractional_position = 0.0; /* New: fractional position for time-stretching */
-  static float input_buffer[4096];       /* Buffer for constant-rate reading */
-  static uint32_t input_buffer_size = 0;
-  static uint32_t input_read_pos = 0;    /* Position in input buffer */
-  static double output_sample_accumulator = 0.0;
-  static bool initialized = false;
-  
-  /* Reset static variables when audio is reset */
-  if (data->reset_audio || !initialized)
+  /* Simple approach: Use existing sample_position from data structure
+   * This keeps it compatible with the existing codebase */
+
+  for (uint32_t i = 0; i < n_samples; i++)
   {
-    timeline_position = 0.0;
-    read_position = 0.0;           /* Reset read position too */
-    output_position = 0.0;         /* Reset output position too */
-    fractional_position = 0.0;     /* Reset fractional position too */
-    input_buffer_size = 0;         /* Reset buffer */
-    input_read_pos = 0;            /* Reset buffer read position */
-    output_sample_accumulator = 0.0;
-    initialized = true;
-  }
-  
-  /* Debug output occasionally */
-  static uint32_t debug_counter = 0;
-  if (++debug_counter >= 1000) {  
-    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, buf_size=%u, out_accum=%.3f", 
-                data->playback_speed, data->pitch_shift, input_buffer_size, output_sample_accumulator);
-    debug_counter = 0;
-  }
-  
-  /* True time-stretching: Sequential file reading with output resampling */
-  
-  /* Fill input buffer by reading sequentially from file (no seeking) */
-  if (input_buffer_size < 2048) {
-    /* Read sequentially from current file position - no speed influence */
-    sf_count_t samples_to_read = 2048 - input_buffer_size;
-    float temp_samples[2048];
-    sf_count_t read_count;
-    
-    if (data->fileinfo.channels == 1) {
-      read_count = sf_readf_float(data->file, temp_samples, samples_to_read);
-    } else {
-      float multi_samples[4096];
-      read_count = sf_readf_float(data->file, multi_samples, samples_to_read);
-      for (sf_count_t j = 0; j < read_count; j++) {
-        temp_samples[j] = multi_samples[j * data->fileinfo.channels];
+    /* Calculate file position */
+    sf_count_t file_pos = (sf_count_t)data->sample_position;
+    double fractional = data->sample_position - file_pos;
+
+    if (file_pos >= total_frames)
+      file_pos = total_frames - 1;
+    if (file_pos < 0)
+      file_pos = 0;
+
+    /* Read sample with interpolation */
+    float raw_sample = 0.0f;
+    if (sf_seek(data->file, file_pos, SEEK_SET) == file_pos)
+    {
+      float samples[2];
+      sf_count_t read_count;
+
+      if (data->fileinfo.channels == 1)
+      {
+        read_count = sf_readf_float(data->file, samples, 2);
       }
-    }
-    
-    /* Handle end of file - loop back to beginning */
-    if (read_count < samples_to_read) {
-      sf_seek(data->file, 0, SEEK_SET);
-      sf_count_t remaining = samples_to_read - read_count;
-      
-      if (data->fileinfo.channels == 1) {
-        sf_count_t additional = sf_readf_float(data->file, &temp_samples[read_count], remaining);
-        read_count += additional;
-      } else {
-        float multi_samples[4096];
-        sf_count_t additional = sf_readf_float(data->file, multi_samples, remaining);
-        for (sf_count_t j = 0; j < additional; j++) {
-          temp_samples[read_count + j] = multi_samples[j * data->fileinfo.channels];
-        }
-        read_count += additional;
-      }
-    }
-    
-    /* Copy to input buffer */
-    for (sf_count_t j = 0; j < read_count; j++) {
-      input_buffer[input_buffer_size + j] = temp_samples[j];
-    }
-    input_buffer_size += read_count;
-  }
-  
-  /* Generate output samples by resampling the input buffer based on speed */
-  for (uint32_t i = 0; i < n_samples; i++) {
-    if (input_buffer_size > 1) {
-      /* Interpolate between samples in the input buffer */
-      uint32_t pos = (uint32_t)output_sample_accumulator;
-      double frac = output_sample_accumulator - pos;
-      
-      if (pos + 1 < input_buffer_size) {
-        buf[i] = input_buffer[pos] + (input_buffer[pos + 1] - input_buffer[pos]) * frac;
-      } else if (pos < input_buffer_size) {
-        buf[i] = input_buffer[pos];
-      } else {
-        buf[i] = 0.0f;
-      }
-      
-      /* Advance output accumulator by speed amount (corrected logic)
-       * speed > 1.0 = advance faster through input (faster tempo)
-       * speed < 1.0 = advance slower through input (slower tempo) */
-      output_sample_accumulator += data->playback_speed;
-      
-      /* If we've consumed input samples, shift buffer */
-      if ((uint32_t)output_sample_accumulator >= input_buffer_size / 2) {
-        uint32_t consumed = (uint32_t)output_sample_accumulator;
-        if (consumed < input_buffer_size) {
-          /* Shift remaining samples to beginning */
-          for (uint32_t j = 0; j < input_buffer_size - consumed; j++) {
-            input_buffer[j] = input_buffer[j + consumed];
-          }
-          input_buffer_size -= consumed;
-          output_sample_accumulator -= consumed;
-        } else {
-          /* Reset buffer */
-          input_buffer_size = 0;
-          output_sample_accumulator = 0.0;
+      else
+      {
+        float multi_samples[4];
+        read_count = sf_readf_float(data->file, multi_samples, 2);
+        for (int j = 0; j < read_count; j++)
+        {
+          samples[j] = multi_samples[j * data->fileinfo.channels];
         }
       }
-    } else {
-      buf[i] = 0.0f; /* Silence if no input data */
+
+      if (read_count >= 1)
+      {
+        if (read_count >= 2 && fractional > 0.0)
+        {
+          raw_sample = samples[0] + (samples[1] - samples[0]) * fractional;
+        }
+        else
+        {
+          raw_sample = samples[0];
+        }
+      }
+    }
+
+    buf[i] = raw_sample;
+
+    /* Advance sample position by speed amount */
+    data->sample_position += data->playback_speed;
+
+    /* Handle file looping */
+    if (data->sample_position >= total_frames)
+    {
+      data->sample_position = fmod(data->sample_position, (double)total_frames);
     }
   }
-  
-  /* Apply pitch shift as PURE POST-PROCESSING - no file operations involved
-   * This modifies the already-read audio buffer to change frequency */
+
+  /* Apply pitch shift as post-processing */
   if (data->pitch_shift != 1.0f)
   {
-    /* Create a copy for pitch processing */
-    static float temp_buffer[2048];
-    uint32_t process_size = (n_samples > 2048) ? 2048 : n_samples;
-    
-    /* Copy original speed-processed audio */
-    for (uint32_t i = 0; i < process_size; i++)
+    for (uint32_t i = 0; i < n_samples; i++)
     {
-      temp_buffer[i] = buf[i];
-    }
-    
-    /* Apply pitch shift via simple amplitude scaling as a test
-     * This is intentionally simple to verify independence */
-    float pitch_factor = data->pitch_shift;
-    for (uint32_t i = 0; i < process_size; i++)
-    {
-      /* Simple pitch approximation: amplitude scaling */
-      buf[i] = temp_buffer[i] * pitch_factor * 0.5f; /* Scale down to prevent clipping */
+      buf[i] *= data->pitch_shift * 0.5f; /* Simple amplitude scaling */
     }
   }
-  
-  /* Timeline position is now advanced within the loop for time-stretching
-   * No additional advancement needed here */
-  
-  /* No additional file position handling needed - 
-   * fractional_position is advanced in the buffer filling logic */
 
   return n_samples;
 }
@@ -421,7 +338,7 @@ void reset_speed_pitch_positions(void)
   static double *speed_position_ptr = NULL;
   static double *pitch_read_position_ptr = NULL;
   static float **speed_buffer_ptr = NULL;
-  
+
   /* On first call, just return - static variables will be initialized properly */
   /* The actual reset happens when the read function detects data->reset_audio */
 }
