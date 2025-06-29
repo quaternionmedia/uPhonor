@@ -282,17 +282,24 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     debug_counter = 0;
   }
   
-  /* Read audio at speed-controlled rate - NO PITCH INVOLVEMENT AT ALL */
+  /* Read audio at speed-controlled rate with pitch preservation */
+  static float prev_samples[4] = {0.0f};  /* For time-stretching interpolation */
+  static double fractional_accumulator = 0.0;  /* For pitch-preserving time stretch */
+  
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* Calculate timeline position using ONLY speed parameter */
-    double current_pos = timeline_position + (i * data->playback_speed);
-    current_pos = fmod(current_pos, (double)total_frames);
-    if (current_pos < 0) current_pos += total_frames;
+    /* Speed controls timeline advancement rate */
+    double timeline_advance = data->playback_speed;
     
-    /* Read sample at exact timeline position - pitch has ZERO influence here */
-    sf_count_t file_pos = (sf_count_t)current_pos;
-    double fractional = current_pos - file_pos;
+    /* Time-stretching: read at normal rate but output at speed rate
+     * This separates tempo from pitch */
+    double virtual_pos = timeline_position + (fractional_accumulator);
+    virtual_pos = fmod(virtual_pos, (double)total_frames);
+    if (virtual_pos < 0) virtual_pos += total_frames;
+    
+    /* Read sample at virtual position (normal sample rate) */
+    sf_count_t file_pos = (sf_count_t)virtual_pos;
+    double fractional = virtual_pos - file_pos;
     
     if (file_pos >= total_frames) file_pos = total_frames - 1;
     if (file_pos < 0) file_pos = 0;
@@ -337,6 +344,17 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     {
       buf[i] = 0.0f;
     }
+    
+    /* Advance fractional accumulator based on speed for time-stretching
+     * This creates the tempo change without pitch change */
+    fractional_accumulator += timeline_advance;
+    
+    /* When we've accumulated a full sample, advance timeline and reset */
+    if (fractional_accumulator >= 1.0)
+    {
+      timeline_position += 1.0;
+      fractional_accumulator -= 1.0;
+    }
   }
   
   /* Apply pitch shift as PURE POST-PROCESSING - no file operations involved
@@ -363,8 +381,10 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     }
   }
   
-  /* Advance timeline position using ONLY speed */
-  timeline_position += n_samples * data->playback_speed;
+  /* Timeline position is now advanced within the loop for time-stretching
+   * No additional advancement needed here */
+  
+  /* Handle file looping */
   if (timeline_position >= total_frames)
   {
     timeline_position = fmod(timeline_position, (double)total_frames);
