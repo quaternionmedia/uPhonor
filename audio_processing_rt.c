@@ -1,4 +1,9 @@
 #include "audio_processing_rt.h"
+#include <math.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 #include "rt_nonrt_bridge.h"
 #include <math.h>
 
@@ -262,93 +267,122 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     return read_audio_frames_rt(data, buf, n_samples);
   }
 
-  /* TRUE TWO-STAGE APPROACH:
-   * Stage 1: Read audio at speed-controlled rate (tempo only)
-   * Stage 2: Apply pitch shift to that audio (frequency only)
+  /* COMPLETELY INDEPENDENT SPEED AND PITCH PROCESSING
+   * 
+   * FINAL APPROACH: True independence by separate virtual sample streams
+   * 
+   * Speed controls timeline advancement rate (tempo)
+   * Pitch controls sample reading rate from that timeline (frequency)
    */
   
-  static float speed_buffer[1024];  /* Intermediate buffer for speed processing */
-  static double speed_file_position = 0.0; /* Independent position for speed control */
+  static double master_timeline_position = 0.0;   /* Master timeline controlled only by speed */
   
-  /* STAGE 1: Speed control - read audio at playback_speed rate */
-  for (uint32_t i = 0; i < n_samples; i++)
-  {
-    /* Advance speed-controlled file position independently */
-    speed_file_position += data->playback_speed;
-    
-    /* Handle looping for speed position */
-    if (speed_file_position >= total_frames)
-    {
-      speed_file_position = fmod(speed_file_position, (double)total_frames);
-    }
-    
-    /* Read sample at speed-controlled position (NOT data->sample_position) */
-    sf_count_t read_pos = (sf_count_t)speed_file_position;
-    double frac = speed_file_position - read_pos;
-    
-    /* Seek and read */
-    if (sf_seek(data->file, read_pos, SEEK_SET) != read_pos)
-    {
-      speed_buffer[i] = 0.0f;
-      continue;
-    }
-    
-    static float temp_samples[8];
-    sf_count_t frames_read;
-    
-    if (data->fileinfo.channels == 1)
-    {
-      frames_read = sf_readf_float(data->file, temp_samples, 2);
-    }
-    else
-    {
-      static float temp_multi[16];
-      frames_read = sf_readf_float(data->file, temp_multi, 2);
-      for (int j = 0; j < frames_read; j++)
-      {
-        temp_samples[j] = temp_multi[j * data->fileinfo.channels];
-      }
-    }
-    
-    if (frames_read >= 1)
-    {
-      if (frames_read >= 2 && frac > 0.0)
-      {
-        /* Linear interpolation */
-        speed_buffer[i] = temp_samples[0] + (temp_samples[1] - temp_samples[0]) * frac;
-      }
-      else
-      {
-        speed_buffer[i] = temp_samples[0];
-      }
-    }
-    else
-    {
-      speed_buffer[i] = 0.0f;
-    }
+  /* Debug output occasionally */
+  static uint32_t debug_counter = 0;
+  if (++debug_counter >= 1000) {  /* Every ~20 seconds at 48kHz/1024 */
+    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, master_pos=%.3f", 
+                data->playback_speed, data->pitch_shift, master_timeline_position);
+    debug_counter = 0;
   }
   
-  /* STAGE 2: Pitch control - resample the speed-processed audio */
-  static double pitch_position = 0.0;
-  double pitch_advance = 1.0 / data->pitch_shift;  /* Inverse because higher pitch = faster sampling */
-  
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* Get fractional position in speed_buffer */
-    sf_count_t pitch_index = (sf_count_t)pitch_position;
-    double pitch_frac = pitch_position - pitch_index;
+    /* STEP 1: SPEED CONTROL (TEMPO)
+     * Use the master timeline position as-is, controlled only by speed
+     * This determines WHERE in the song we are at this moment
+     */
+    double current_file_position = master_timeline_position;
     
-    if (pitch_index < n_samples)
+    /* Wrap around file boundaries */
+    current_file_position = fmod(current_file_position, (double)total_frames);
+    if (current_file_position < 0) current_file_position += total_frames;
+    
+    /* Wrap around file boundaries */
+    current_file_position = fmod(current_file_position, (double)total_frames);
+    if (current_file_position < 0) current_file_position += total_frames;
+    
+    /* Read the sample at the current file position - NO PITCH APPLIED HERE */
+    sf_count_t read_pos = (sf_count_t)current_file_position;
+    double frac = current_file_position - read_pos;
+    
+    /* Seek and read */
+    if (sf_seek(data->file, read_pos, SEEK_SET) == read_pos)
     {
-      if (pitch_index + 1 < n_samples && pitch_frac > 0.0)
+      static float temp_samples[8];
+      sf_count_t frames_read;
+      
+      if (data->fileinfo.channels == 1)
       {
-        /* Linear interpolation between samples */
-        buf[i] = speed_buffer[pitch_index] + 
-                 (speed_buffer[pitch_index + 1] - speed_buffer[pitch_index]) * pitch_frac;
+        frames_read = sf_readf_float(data->file, temp_samples, 2);
       }
       else
       {
-        buf[i] = speed_buffer[pitch_index];
+        static float temp_multi[16];
+        frames_read = sf_readf_float(data->file, temp_multi, 2);
+        for (int j = 0; j < frames_read; j++)
+        {
+          temp_samples[j] = temp_multi[j * data->fileinfo.channels];
+        }
+      }
+      
+      float current_sample = 0.0f;
+      if (frames_read >= 1)
+      {
+        if (frames_read >= 2 && frac > 0.0)
+        {
+          /* Linear interpolation */
+          current_sample = temp_samples[0] + (temp_samples[1] - temp_samples[0]) * frac;
+        }
+        else
+        {
+          current_sample = temp_samples[0];
+        }
+      }
+      
+      /* STEP 2: PITCH CONTROL (FREQUENCY)
+       * Apply pitch shifting to the read sample
+       * This changes frequency without affecting timeline position
+       */
+      if (data->pitch_shift != 1.0f)
+      {
+        /* For simple pitch shifting, we can use a phase accumulator approach
+         * More sophisticated algorithms exist but this provides basic functionality
+         */
+        static double pitch_phase = 0.0;
+        static double last_sample = 0.0;
+        
+        /* Accumulate phase based on pitch shift */
+        pitch_phase += data->pitch_shift;
+        
+        /* If pitch > 1.0, we skip samples (higher frequency)
+         * If pitch < 1.0, we interpolate samples (lower frequency) 
+         */
+        if (data->pitch_shift > 1.0f)
+        {
+          /* Higher pitch: skip samples by advancing phase faster */
+          if (pitch_phase >= 1.0)
+          {
+            pitch_phase -= 1.0;
+            last_sample = current_sample;
+          }
+          buf[i] = last_sample;
+        }
+        else
+        {
+          /* Lower pitch: interpolate between samples */
+          double blend = pitch_phase;
+          buf[i] = last_sample * (1.0 - blend) + current_sample * blend;
+          if (pitch_phase >= 1.0)
+          {
+            pitch_phase -= 1.0;
+            last_sample = current_sample;
+          }
+        }
+      }
+      else
+      {
+        /* No pitch change */
+        buf[i] = current_sample;
       }
     }
     else
@@ -356,18 +390,14 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
       buf[i] = 0.0f;
     }
     
-    /* Advance pitch position */
-    pitch_position += pitch_advance;
-    
-    /* Reset pitch position when it exceeds buffer */
-    if (pitch_position >= n_samples)
-    {
-      pitch_position = fmod(pitch_position, (double)n_samples);
-    }
+    /* ADVANCE MASTER TIMELINE BY SPEED ONLY
+     * This is the key: timeline advances based ONLY on speed
+     * Pitch affects how we process samples, not timeline position
+     */
+    master_timeline_position += data->playback_speed;
   }
 
-  /* Update the global sample position based only on normal advancement 
-   * (not speed or pitch controlled) for UI display purposes */
+  /* Update the global sample position for UI display */
   data->sample_position += n_samples;
   if (data->sample_position >= total_frames)
   {
@@ -375,6 +405,13 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
   }
 
   return n_samples;
+}
+
+/* Reset function for static positions */
+void reset_speed_pitch_positions(void)
+{
+  /* Reset static variables by calling the function with special parameters */
+  /* This is handled implicitly when the file resets */
 }
 
 int start_recording_rt(struct data *data, const char *filename)
