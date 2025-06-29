@@ -285,26 +285,32 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     debug_counter = 0;
   }
   
-  /* Calculate effective pitch shift that includes speed compensation
-   * Speed changes require opposite pitch correction to maintain frequency
-   * e.g., 2x speed needs 0.5x pitch to keep same frequency */
-  float speed_compensation = 1.0f / data->playback_speed;
-  float effective_pitch = data->pitch_shift * speed_compensation;
-  
   /* Process each output sample */
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* STEP 1: Calculate timeline position based on speed
-     * This controls WHEN we are in the song (tempo) */
+    /* STEP 1: Calculate timeline position based ONLY on speed
+     * This controls tempo - how fast we advance through the song */
     double current_timeline_pos = timeline_position + (i * data->playback_speed);
     current_timeline_pos = fmod(current_timeline_pos, (double)total_frames);
     if (current_timeline_pos < 0) current_timeline_pos += total_frames;
     
-    /* STEP 2: Apply effective pitch shift to determine which sample to read
-     * This controls the frequency content while maintaining the timeline position */
-    double sample_read_position = current_timeline_pos * effective_pitch;
-    sample_read_position = fmod(sample_read_position, (double)total_frames);
-    if (sample_read_position < 0) sample_read_position += total_frames;
+    /* STEP 2: Apply pitch shift to determine which sample to read
+     * This controls frequency without affecting timeline advancement */
+    double sample_read_position;
+    if (data->pitch_shift == 1.0f)
+    {
+      /* No pitch shift - read exactly at timeline position */
+      sample_read_position = current_timeline_pos;
+    }
+    else
+    {
+      /* Pitch shift: modify which sample we read relative to timeline position
+       * Higher pitch = read samples spaced further apart
+       * Lower pitch = read samples spaced closer together */
+      sample_read_position = current_timeline_pos * data->pitch_shift;
+      sample_read_position = fmod(sample_read_position, (double)total_frames);
+      if (sample_read_position < 0) sample_read_position += total_frames;
+    }
     
     /* Read the sample */
     sf_count_t file_pos = (sf_count_t)sample_read_position;
