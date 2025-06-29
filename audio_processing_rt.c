@@ -264,24 +264,23 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
    */
   
   static float speed_buffer[1024];  /* Intermediate buffer for speed processing */
-  uint32_t buffer_size = (n_samples < 1024) ? n_samples : 1024;
+  static double speed_file_position = 0.0; /* Independent position for speed control */
   
   /* STAGE 1: Speed control - read audio at playback_speed rate */
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* Advance file position by playback_speed */
-    double speed_advance = data->playback_speed;
-    data->sample_position += speed_advance;
+    /* Advance speed-controlled file position independently */
+    speed_file_position += data->playback_speed;
     
-    /* Handle looping */
-    if (data->sample_position >= total_frames)
+    /* Handle looping for speed position */
+    if (speed_file_position >= total_frames)
     {
-      data->sample_position = fmod(data->sample_position, (double)total_frames);
+      speed_file_position = fmod(speed_file_position, (double)total_frames);
     }
     
-    /* Read sample at current position */
-    sf_count_t read_pos = (sf_count_t)data->sample_position;
-    double frac = data->sample_position - read_pos;
+    /* Read sample at speed-controlled position (NOT data->sample_position) */
+    sf_count_t read_pos = (sf_count_t)speed_file_position;
+    double frac = speed_file_position - read_pos;
     
     /* Seek and read */
     if (sf_seek(data->file, read_pos, SEEK_SET) != read_pos)
@@ -361,6 +360,14 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     {
       pitch_position = fmod(pitch_position, (double)n_samples);
     }
+  }
+
+  /* Update the global sample position based only on normal advancement 
+   * (not speed or pitch controlled) for UI display purposes */
+  data->sample_position += n_samples;
+  if (data->sample_position >= total_frames)
+  {
+    data->sample_position = fmod(data->sample_position, (double)total_frames);
   }
 
   return n_samples;
