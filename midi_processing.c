@@ -1,5 +1,4 @@
 #include "midi_processing.h"
-#include "holo.c"
 
 #define PERIOD_NSEC (SPA_NSEC_PER_SEC / 8)
 #define SPEED_CC_NUMBER 74 /* MIDI CC 74 for playback speed control */
@@ -120,22 +119,21 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
      * CC value 0 = quarter speed (0.25x)
      * CC value 127 = quadruple speed (4.0x)
      */
-    float normalized_value = (float)value / 127.0f;
 
-    /* Map 0-1 range to 0.25-4.0 range with 64/127 being 1.0 */
-    if (value < 64)
+    /* Improved mapping with proper boundary handling */
+    if (value <= 64)
     {
-      /* Map 0-63 to 0.25-1.0 */
-      data->playback_speed = 0.25f + (normalized_value * 64.0f / 127.0f) * 0.75f;
+      /* Map 0-64 to 0.25-1.0 */
+      data->playback_speed = 0.25f + (value / 64.0f) * 0.75f;
     }
     else
     {
-      /* Map 64-127 to 1.0-4.0 */
-      data->playback_speed = 1.0f + ((normalized_value - 64.0f / 127.0f) * 127.0f / 63.0f) * 3.0f;
+      /* Map 65-127 to 1.0-4.0 */
+      data->playback_speed = 1.0f + ((value - 64.0f) / 63.0f) * 3.0f;
     }
 
-    pw_log_info("Playback speed set to %.2fx (CC%d = %d)",
-                data->playback_speed, controller, value);
+    pw_log_info("SPEED CONTROL: CC%d = %d -> speed = %.3fx (pitch unchanged = %.3fx)",
+                controller, value, data->playback_speed, data->pitch_shift);
   }
   break;
 
@@ -146,23 +144,21 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
      * CC value 0 = two octaves down (0.25x)
      * CC value 127 = two octaves up (4.0x)
      */
-    float normalized_value = (float)value / 127.0f;
 
-    /* Map 0-1 range to 0.25-4.0 range with 64/127 being 1.0 */
-    if (value < 64)
+    /* Improved mapping with proper boundary handling */
+    if (value <= 64)
     {
-      /* Map 0-63 to 0.25-1.0 */
-      data->pitch_shift = 0.25f + (normalized_value * 64.0f / 127.0f) * 0.75f;
+      /* Map 0-64 to 0.25-1.0 */
+      data->pitch_shift = 0.25f + (value / 64.0f) * 0.75f;
     }
     else
     {
-      /* Map 64-127 to 1.0-4.0 */
-      data->pitch_shift = 1.0f + ((normalized_value - 64.0f / 127.0f) * 127.0f / 63.0f) * 3.0f;
+      /* Map 65-127 to 1.0-4.0 */
+      data->pitch_shift = 1.0f + ((value - 64.0f) / 63.0f) * 3.0f;
     }
 
-    data->pitch_position = 0.0; // Reset pitch position when changing pitch
-    pw_log_info("Pitch shift set to %.2fx (CC%d = %d)",
-                data->pitch_shift, controller, value);
+    pw_log_info("PITCH CONTROL: CC%d = %d -> pitch = %.3fx (speed unchanged = %.3fx)",
+                controller, value, data->pitch_shift, data->playback_speed);
   }
   break;
 

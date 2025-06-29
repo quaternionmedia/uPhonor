@@ -86,8 +86,6 @@ struct data
   float pitch_shift;
   /* Fractional sample position for variable speed playback */
   double sample_position;
-  /* Fractional sample position for pitch shifting (independent of speed) */
-  double pitch_position;
 
   /* RT/Non-RT bridge for performance-critical operations */
   struct rt_nonrt_bridge rt_bridge;

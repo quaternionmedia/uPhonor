@@ -1,0 +1,14 @@
+<!DOCTYPE patchbay>
+<patchbay name="uphonor" version="0.6.1">
+ <items>
+  <item node-type="pipewire" port-type="pipewire-audio">
+   <output port="uPhonor:audio_output" node="Micro-phonor Loop manager"/>
+   <input port="CS4206 Analog:playback_FL" node="Built-in Audio Analog Stereo"/>
+  </item>
+  <item node-type="pipewire" port-type="pipewire-audio">
+   <output port="uPhonor:audio_output" node="Micro-phonor Loop manager"/>
+   <input port="CS4206 Analog:playback_FR" node="Built-in Audio Analog Stereo"/>
+  </item>
+ </items>
+</patchbay>
+

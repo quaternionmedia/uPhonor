@@ -43,6 +43,5 @@ void set_pitch_shift(struct data *data, float new_pitch)
     new_pitch = 4.0f;   // Maximum 4x pitch (2 octaves up)
 
   data->pitch_shift = new_pitch;
-  data->pitch_position = 0.0; // Reset pitch position when changing pitch
   pw_log_info("Pitch shift set to %.2fx", new_pitch);
 }
