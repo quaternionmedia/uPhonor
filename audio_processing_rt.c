@@ -258,16 +258,13 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     return n_samples;
   }
 
-  /* TIME-STRETCH APPROACH: Speed affects tempo only, pitch affects frequency only
+  /* COMPLETELY SEPARATE SPEED AND PITCH PROCESSING
    * 
-   * Speed (CC 74): Changes playback rate but automatically applies pitch correction
-   *                to keep frequency constant (time-stretching effect)
-   * Pitch (CC 75): Changes frequency only without affecting tempo
-   * 
-   * This gives independent control over tempo and frequency
+   * Stage 1: Read audio at speed-controlled rate (tempo only)
+   * Stage 2: Apply pitch shift as independent resampling (frequency only)
    */
   
-  static double timeline_position = 0.0;    /* Tracks position in file */
+  static double timeline_position = 0.0;
   static bool initialized = false;
   
   /* Reset static variables when audio is reset */
@@ -285,29 +282,26 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     debug_counter = 0;
   }
   
-  /* Process each output sample */
-  for (uint32_t i = 0; i < n_samples; i++)
+  /* STAGE 1: Read audio based ONLY on speed (timeline control)
+   * This creates a speed-controlled audio stream with original pitch */
+  float speed_buffer[2048];  /* Temp buffer for speed-processed audio */
+  uint32_t buffer_size = (n_samples > 2048) ? 2048 : n_samples;
+  
+  for (uint32_t i = 0; i < buffer_size; i++)
   {
-    /* STEP 1: Calculate timeline position based ONLY on speed
-     * This controls tempo - how fast we advance through the song */
-    double current_timeline_pos = timeline_position + (i * data->playback_speed);
-    current_timeline_pos = fmod(current_timeline_pos, (double)total_frames);
-    if (current_timeline_pos < 0) current_timeline_pos += total_frames;
+    /* Calculate timeline position based ONLY on speed */
+    double current_pos = timeline_position + (i * data->playback_speed);
+    current_pos = fmod(current_pos, (double)total_frames);
+    if (current_pos < 0) current_pos += total_frames;
     
-    /* STEP 2: Read sample at timeline position WITHOUT any pitch modification
-     * Speed controls ONLY the timeline, not the sample selection */
-    double sample_read_position = current_timeline_pos;  /* No pitch influence here */
+    /* Read sample at speed-controlled position */
+    sf_count_t file_pos = (sf_count_t)current_pos;
+    double fractional = current_pos - file_pos;
     
-    /* Read the sample */
-    sf_count_t file_pos = (sf_count_t)sample_read_position;
-    double fractional = sample_read_position - file_pos;
-    
-    /* Bounds checking */
     if (file_pos >= total_frames) file_pos = total_frames - 1;
     if (file_pos < 0) file_pos = 0;
     
-    /* Read raw sample from file */
-    float raw_sample = 0.0f;
+    /* Read from file */
     if (sf_seek(data->file, file_pos, SEEK_SET) == file_pos)
     {
       float samples[4];
@@ -331,43 +325,71 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
       {
         if (read_count >= 2 && fractional > 0.0)
         {
-          raw_sample = samples[0] + (samples[1] - samples[0]) * fractional;
+          speed_buffer[i] = samples[0] + (samples[1] - samples[0]) * fractional;
         }
         else
         {
-          raw_sample = samples[0];
+          speed_buffer[i] = samples[0];
         }
       }
-    }
-    
-    /* STEP 3: Apply pitch shift as frequency modulation (NOT affecting timeline)
-     * This changes the frequency content without changing the playback speed */
-    if (data->pitch_shift == 1.0f)
-    {
-      /* No pitch shift */
-      buf[i] = raw_sample;
+      else
+      {
+        speed_buffer[i] = 0.0f;
+      }
     }
     else
     {
-      /* Simple pitch shift: amplitude modulation to change perceived frequency
-       * This is a basic approach - more sophisticated pitch shifting would use
-       * phase vocoder or PSOLA techniques */
-      static double pitch_oscillator = 0.0;
-      
-      /* Generate a simple frequency shift using amplitude modulation */
-      double freq_shift_factor = 1.0 + (data->pitch_shift - 1.0) * 0.5;
-      double modulated_sample = raw_sample * freq_shift_factor;
-      
-      /* Apply a simple frequency domain shift approximation */
-      buf[i] = modulated_sample;
-      
-      /* Advance oscillator for pitch shifting */
-      pitch_oscillator += data->pitch_shift * 0.001; /* Small increment for frequency shift */
-      if (pitch_oscillator >= 1.0) pitch_oscillator -= 1.0;
+      speed_buffer[i] = 0.0f;
     }
   }
   
-  /* Advance timeline position based ONLY on speed (tempo control) */
+  /* STAGE 2: Apply pitch shift to speed-processed audio
+   * This resamples the speed_buffer to change frequency without affecting tempo */
+  if (data->pitch_shift == 1.0f)
+  {
+    /* No pitch shift - direct copy */
+    for (uint32_t i = 0; i < buffer_size; i++)
+    {
+      buf[i] = speed_buffer[i];
+    }
+  }
+  else
+  {
+    /* Pitch shift by resampling the speed_buffer */
+    for (uint32_t i = 0; i < buffer_size; i++)
+    {
+      /* Calculate source position in speed_buffer for pitch shifting */
+      double src_pos = (double)i / data->pitch_shift;
+      uint32_t src_idx = (uint32_t)src_pos;
+      double src_frac = src_pos - src_idx;
+      
+      if (src_idx < buffer_size)
+      {
+        if (src_idx + 1 < buffer_size && src_frac > 0.0)
+        {
+          /* Linear interpolation for pitch shift */
+          buf[i] = speed_buffer[src_idx] + (speed_buffer[src_idx + 1] - speed_buffer[src_idx]) * src_frac;
+        }
+        else
+        {
+          buf[i] = speed_buffer[src_idx];
+        }
+      }
+      else
+      {
+        /* Beyond buffer - use last available sample */
+        buf[i] = (buffer_size > 0) ? speed_buffer[buffer_size - 1] : 0.0f;
+      }
+    }
+  }
+  
+  /* Fill remaining samples if buffer was truncated */
+  for (uint32_t i = buffer_size; i < n_samples; i++)
+  {
+    buf[i] = 0.0f;
+  }
+  
+  /* Advance timeline position based ONLY on speed */
   timeline_position += n_samples * data->playback_speed;
   if (timeline_position >= total_frames)
   {
