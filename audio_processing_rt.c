@@ -263,91 +263,59 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     return n_samples;
   }
 
-  /* If both speed and pitch are normal, use optimized path */
-  if (data->playback_speed == 1.0f && data->pitch_shift == 1.0f)
-  {
-    return read_audio_frames_rt(data, buf, n_samples);
-  }
-
-  /* ULTIMATE SIMPLICITY APPROACH
+  /* SIMPLE INDEPENDENT APPROACH
    * 
-   * Two completely separate position counters:
-   * 1. Speed position: advances by playback_speed
-   * 2. Pitch position: advances by pitch_shift  
-   * 
-   * Use ONLY speed for timeline, ONLY pitch for frequency
+   * Use a single position that advances by speed only.
+   * Apply pitch as a separate resampling factor.
    */
   
-  static double speed_timeline = 0.0;      /* Timeline position (tempo) */
-  static double pitch_frequency = 0.0;     /* Frequency position (pitch) */
+  static double file_position = 0.0;       /* Current position in file (speed only) */
   static bool initialized = false;
   
   /* Reset static variables when audio is reset */
   if (data->reset_audio || !initialized)
   {
-    speed_timeline = 0.0;
-    pitch_frequency = 0.0;
+    file_position = 0.0;
     initialized = true;
   }
   
   /* Debug output occasionally */
   static uint32_t debug_counter = 0;
   if (++debug_counter >= 1000) {  /* Every ~20 seconds at 48kHz/1024 */
-    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, timeline=%.3f, freq=%.3f", 
-                data->playback_speed, data->pitch_shift, speed_timeline, pitch_frequency);
+    pw_log_info("DEBUG: speed=%.3f, pitch=%.3f, position=%.3f", 
+                data->playback_speed, data->pitch_shift, file_position);
     debug_counter = 0;
   }
   
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    /* PURE SPEED CONTROL: Only affects WHEN we play (timeline position) */
-    double timeline_position = speed_timeline + (i * data->playback_speed);
-    timeline_position = fmod(timeline_position, (double)total_frames);
-    if (timeline_position < 0) timeline_position += total_frames;
+    /* STEP 1: Calculate file position based ONLY on speed */
+    double current_position = file_position + (i * data->playback_speed);
+    current_position = fmod(current_position, (double)total_frames);
+    if (current_position < 0) current_position += total_frames;
     
-    /* PURE PITCH CONTROL: Only affects WHAT FREQUENCY we play at */
-    double frequency_position = pitch_frequency + (i * data->pitch_shift);
-    frequency_position = fmod(frequency_position, (double)total_frames);
-    if (frequency_position < 0) frequency_position += total_frames;
+    /* STEP 2: Apply pitch shift ONLY to the reading, not the position */
+    double read_position = current_position;
     
-    /* INDEPENDENT CONTROL: Speed affects timeline, pitch affects frequency sampling */
-    double final_position;
-    
-    /* ALWAYS use speed timeline for position - this ensures CC 74 controls tempo only
-     * Even when speed is 1.0, we still use the speed timeline to maintain independence */
-    final_position = timeline_position;
-    
-    /* Pitch will ONLY affect resampling in the interpolation step below
-     * This ensures CC 75 never affects the timeline position */
-    
-    /* Read sample at calculated position with independent pitch resampling */
-    sf_count_t read_pos = (sf_count_t)final_position;
-    double frac = final_position - read_pos;
-    
-    /* PITCH RESAMPLING: Apply pitch shift through interpolation modification
-     * This must happen whenever pitch != 1.0, regardless of speed setting */
+    /* If pitch != 1.0, modify where we read from without affecting timeline */
     if (data->pitch_shift != 1.0f)
     {
-      /* ALWAYS apply pitch shift the same way, regardless of speed
-       * Use the pitch_shift value directly to modify the interpolation fraction */
-      frac *= data->pitch_shift;
+      /* Use pitch to create a local offset for resampling */
+      double pitch_offset = (i * (data->pitch_shift - 1.0f)) * 0.1;
+      read_position += pitch_offset;
       
-      /* Handle interpolation overflow/underflow */
-      while (frac >= 1.0) 
-      {
-        read_pos += 1;
-        frac -= 1.0;
-      }
-      while (frac < 0.0) 
-      {
-        read_pos -= 1;
-        frac += 1.0;
-      }
-      
-      /* Ensure read position stays in bounds */
-      if (read_pos >= total_frames) read_pos = total_frames - 1;
-      if (read_pos < 0) read_pos = 0;
+      /* Wrap the read position */
+      read_position = fmod(read_position, (double)total_frames);
+      if (read_position < 0) read_position += total_frames;
     }
+    
+    /* Read sample at calculated position */
+    sf_count_t read_pos = (sf_count_t)read_position;
+    double frac = read_position - read_pos;
+    
+    /* Ensure read position stays in bounds */
+    if (read_pos >= total_frames) read_pos = total_frames - 1;
+    if (read_pos < 0) read_pos = 0;
     
     /* Seek and read with interpolation */
     if (sf_seek(data->file, read_pos, SEEK_SET) == read_pos)
@@ -373,7 +341,7 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
       {
         if (frames_read >= 2 && frac > 0.0)
         {
-          /* Linear interpolation with pitch influence */
+          /* Linear interpolation */
           buf[i] = temp_samples[0] + (temp_samples[1] - temp_samples[0]) * frac;
         }
         else
@@ -392,17 +360,11 @@ sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *b
     }
   }
   
-  /* Advance positions independently */
-  speed_timeline += n_samples * data->playback_speed;
-  if (speed_timeline >= total_frames)
+  /* Advance file position by speed only - pitch never affects this */
+  file_position += n_samples * data->playback_speed;
+  if (file_position >= total_frames)
   {
-    speed_timeline = fmod(speed_timeline, (double)total_frames);
-  }
-  
-  pitch_frequency += n_samples * data->pitch_shift;
-  if (pitch_frequency >= total_frames)
-  {
-    pitch_frequency = fmod(pitch_frequency, (double)total_frames);
+    file_position = fmod(file_position, (double)total_frames);
   }
 
   /* Update the global sample position for UI display */
