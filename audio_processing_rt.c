@@ -90,6 +90,7 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   {
     sf_seek(data->file, 0, SEEK_SET);
     data->sample_position = 0.0;  /* Reset fractional position for variable speed */
+    data->pitch_position = 0.0;   /* Reset fractional position for pitch shifting */
     data->reset_audio = false;
   }
 
@@ -213,87 +214,128 @@ sf_count_t read_audio_frames_variable_speed_rt(struct data *data, float *buf, ui
     data->playback_speed = 1.0f;
   }
 
-  if (data->playback_speed == 1.0f)
+  if (data->pitch_shift <= 0.0f || data->pitch_shift > 10.0f)
   {
-    /* Normal speed - use the optimized path */
+    /* Invalid pitch, use normal pitch as fallback */
+    data->pitch_shift = 1.0f;
+  }
+
+  if (data->playback_speed == 1.0f && data->pitch_shift == 1.0f)
+  {
+    /* Normal speed and pitch - use the optimized path */
     return read_audio_frames_rt(data, buf, n_samples);
   }
 
-  /* Variable speed playback using linear interpolation */
+  /* Independent speed and pitch control */
+  return read_audio_frames_variable_speed_pitch_rt(data, buf, n_samples);
+}
+
+sf_count_t read_audio_frames_variable_speed_pitch_rt(struct data *data, float *buf, uint32_t n_samples)
+{
   sf_count_t total_frames = data->fileinfo.frames;
   uint32_t output_frames = 0;
-
+  
+  /* Pre-allocate interpolation buffer for pitch shifting */
+  static float pitch_buffer[4096]; /* Static buffer to avoid allocation in RT thread */
+  uint32_t pitch_buffer_size = sizeof(pitch_buffer) / sizeof(float);
+  
   for (uint32_t i = 0; i < n_samples && output_frames < n_samples; i++)
   {
-    /* Get integer and fractional parts of sample position */
-    sf_count_t sample_index = (sf_count_t)data->sample_position;
-    double frac = data->sample_position - sample_index;
+    /* Speed control: advance through file at playback_speed rate */
+    sf_count_t speed_sample_index = (sf_count_t)data->sample_position;
+    double speed_frac = data->sample_position - speed_sample_index;
 
-    /* Handle looping */
-    if (sample_index >= total_frames)
+    /* Handle looping for speed */
+    if (speed_sample_index >= total_frames)
     {
       data->sample_position = fmod(data->sample_position, total_frames);
-      sample_index = (sf_count_t)data->sample_position;
-      frac = data->sample_position - sample_index;
-      sf_seek(data->file, sample_index, SEEK_SET);
+      speed_sample_index = (sf_count_t)data->sample_position;
+      speed_frac = data->sample_position - speed_sample_index;
     }
 
-    /* Read current and next samples for interpolation */
-    float current_sample = 0.0f;
-    float next_sample = 0.0f;
+    /* Read a small window of samples for pitch shifting */
+    uint32_t window_size = SPA_MIN(64, pitch_buffer_size); /* Small window for real-time processing */
+    sf_count_t read_start = SPA_MAX(0, speed_sample_index - window_size/2);
+    sf_count_t read_end = SPA_MIN(total_frames, read_start + window_size);
+    sf_count_t window_frames = read_end - read_start;
 
+    /* Seek and read the window */
+    if (sf_seek(data->file, read_start, SEEK_SET) != read_start)
+    {
+      /* Seek failed, fill with silence */
+      buf[output_frames] = 0.0f;
+      output_frames++;
+      data->sample_position += data->playback_speed;
+      continue;
+    }
+
+    sf_count_t frames_read;
     if (data->fileinfo.channels == 1)
     {
-      /* Mono file - direct read */
-      sf_seek(data->file, sample_index, SEEK_SET);
-      sf_readf_float(data->file, &current_sample, 1);
-
-      if (sample_index + 1 < total_frames)
-      {
-        sf_readf_float(data->file, &next_sample, 1);
-      }
-      else
-      {
-        /* End of file - use first sample for looping */
-        sf_seek(data->file, 0, SEEK_SET);
-        sf_readf_float(data->file, &next_sample, 1);
-      }
+      /* Mono file - direct read into pitch buffer */
+      frames_read = sf_readf_float(data->file, pitch_buffer, window_frames);
     }
     else
     {
-      /* Multi-channel file - extract first channel */
-      float temp_buffer[data->fileinfo.channels];
-
-      sf_seek(data->file, sample_index, SEEK_SET);
-      if (sf_readf_float(data->file, temp_buffer, 1) == 1)
+      /* Multi-channel file - read and extract first channel */
+      static float temp_multichannel[4096]; /* Static to avoid allocation */
+      sf_count_t temp_frames = sf_readf_float(data->file, temp_multichannel, 
+                                              SPA_MIN(window_frames, 4096 / data->fileinfo.channels));
+      
+      /* Extract first channel */
+      for (sf_count_t j = 0; j < temp_frames; j++)
       {
-        current_sample = temp_buffer[0];
+        pitch_buffer[j] = temp_multichannel[j * data->fileinfo.channels];
       }
-
-      if (sample_index + 1 < total_frames)
-      {
-        if (sf_readf_float(data->file, temp_buffer, 1) == 1)
-        {
-          next_sample = temp_buffer[0];
-        }
-      }
-      else
-      {
-        /* End of file - use first sample for looping */
-        sf_seek(data->file, 0, SEEK_SET);
-        if (sf_readf_float(data->file, temp_buffer, 1) == 1)
-        {
-          next_sample = temp_buffer[0];
-        }
-      }
+      frames_read = temp_frames;
     }
 
-    /* Linear interpolation */
-    buf[output_frames] = current_sample + (next_sample - current_sample) * frac;
+    if (frames_read <= 0)
+    {
+      /* No data read, fill with silence */
+      buf[output_frames] = 0.0f;
+      output_frames++;
+      data->sample_position += data->playback_speed;
+      continue;
+    }
+
+    /* Pitch shifting: resample the window at pitch_shift rate */
+    /* Calculate position within the window for pitch shifting */
+    double window_offset = (double)(speed_sample_index - read_start);
+    double pitch_sample_pos = window_offset + data->pitch_position;
+    
+    /* Apply pitch shift by changing sample rate */
+    pitch_sample_pos *= data->pitch_shift;
+    
+    /* Ensure we stay within the window */
+    if (pitch_sample_pos < 0.0)
+      pitch_sample_pos = 0.0;
+    if (pitch_sample_pos >= frames_read - 1)
+      pitch_sample_pos = frames_read - 1.001; /* Slight offset to avoid boundary issues */
+
+    /* Linear interpolation for pitch shifting */
+    sf_count_t pitch_index = (sf_count_t)pitch_sample_pos;
+    double pitch_frac = pitch_sample_pos - pitch_index;
+    
+    float current_sample = pitch_buffer[pitch_index];
+    float next_sample = (pitch_index + 1 < frames_read) ? 
+                        pitch_buffer[pitch_index + 1] : pitch_buffer[pitch_index];
+    
+    /* Interpolate between samples */
+    buf[output_frames] = current_sample + (next_sample - current_sample) * pitch_frac;
     output_frames++;
 
-    /* Advance sample position by speed multiplier */
+    /* Advance positions */
     data->sample_position += data->playback_speed;
+    
+    /* Update pitch position (smaller increments for independent control) */
+    data->pitch_position += (data->pitch_shift - 1.0f) * 0.1f; /* Fine-tune this factor */
+    
+    /* Keep pitch position bounded */
+    if (data->pitch_position > 1.0)
+      data->pitch_position -= 1.0;
+    if (data->pitch_position < -1.0)
+      data->pitch_position += 1.0;
   }
 
   /* Fill remaining buffer with silence if needed */

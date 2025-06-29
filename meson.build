@@ -21,6 +21,7 @@ uphonor_sources = [
   'midi_processing.c', 
   'buffer_manager.c',
   'record.c',
+  'holo.c',
 ]
 
 # exes

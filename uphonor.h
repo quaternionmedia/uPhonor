@@ -82,8 +82,12 @@ struct data
   float volume;
   /* Playback speed multiplier (1.0 = normal speed, 0.5 = half speed, 2.0 = double speed) */
   float playback_speed;
+  /* Pitch shift multiplier (1.0 = normal pitch, 0.5 = one octave down, 2.0 = one octave up) */
+  float pitch_shift;
   /* Fractional sample position for variable speed playback */
   double sample_position;
+  /* Fractional sample position for pitch shifting (independent of speed) */
+  double pitch_position;
 
   /* RT/Non-RT bridge for performance-critical operations */
   struct rt_nonrt_bridge rt_bridge;
@@ -103,6 +107,7 @@ void process_loops(struct data *data, struct spa_io_position *position, float vo
 /* Utility functions */
 void set_volume(struct data *data, float new_volume);
 void set_playback_speed(struct data *data, float new_speed);
+void set_pitch_shift(struct data *data, float new_pitch);
 float linear_to_db_volume(float linear_volume);
 
 void state_changed(void *userdata, enum pw_filter_state old,
