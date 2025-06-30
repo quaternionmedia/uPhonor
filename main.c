@@ -1,5 +1,5 @@
 #include "uphonor.h"
-#include "cli.c"
+#include "cli_rubberband.c"
 #include "pipe.c"
 #include "process.c"
 #include "audio_processing_rt.h"
@@ -24,7 +24,7 @@ int main(int argc, char *argv[])
   data.record_file = NULL;
   data.record_filename = NULL;
 
-  data.volume = 1.0f; // Default volume level
+  data.volume = 1.0f;         // Default volume level
   data.playback_speed = 1.0f; // Default normal speed
   data.sample_position = 0.0; // Initialize fractional sample position
 
@@ -58,6 +58,15 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Failed to allocate audio buffers\n");
     return -1;
   }
+
+  /* Initialize rubberband after we have format information */
+  /* Note: We'll initialize this later when we have proper format info */
+  data.rubberband_state = NULL;
+  data.pitch_shift = 0.0f;
+  data.rubberband_enabled = true;
+  data.rubberband_input_buffer = NULL;
+  data.rubberband_output_buffer = NULL;
+  data.rubberband_buffer_size = 0;
   /* Set up buffer parameters for audio */
   const struct spa_pod *params[1];
   uint8_t buffer[1024];
@@ -181,6 +190,11 @@ int main(int argc, char *argv[])
   int cli_status = cli(argc, argv, &data);
   if (cli_status != 0)
   {
+    if (cli_status == 1)
+    {
+      // Help was shown, exit normally
+      return 0;
+    }
     fprintf(stderr, "Error in command line interface: %d\n", cli_status);
     return cli_status;
   }
@@ -210,6 +224,9 @@ int main(int argc, char *argv[])
   // Free performance buffers
   free(data.silence_buffer);
   free(data.temp_audio_buffer);
+
+  // Clean up rubberband
+  cleanup_rubberband(&data);
 
   return 0;
 }
