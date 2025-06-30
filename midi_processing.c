@@ -2,9 +2,10 @@
 #include "holo.c"
 
 #define PERIOD_NSEC (SPA_NSEC_PER_SEC / 8)
-#define SPEED_CC_NUMBER 74 /* MIDI CC 74 for playback speed control */
-#define PITCH_CC_NUMBER 75 /* MIDI CC 75 for pitch shift control */
+#define SPEED_CC_NUMBER 74         /* MIDI CC 74 for playback speed control */
+#define PITCH_CC_NUMBER 75         /* MIDI CC 75 for pitch shift control */
 #define RECORD_PLAYER_CC_NUMBER 76 /* MIDI CC 76 for record player mode */
+#define VOLUME_CC_NUMBER 7         /* MIDI CC 7 for volume control */
 
 void handle_midi_message(struct data *data, uint8_t *midi_data)
 {
@@ -215,6 +216,17 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
     pw_log_info("MIDI CC%d: Record player mode %.2fx speed/pitch", controller, speed_pitch_factor);
   }
   break;
+
+  case VOLUME_CC_NUMBER:
+  {
+    /* Convert MIDI CC value (0-127) to volume (0.0-1.0) */
+    float volume = (float)(value & 0x7f) / 127.0f;
+
+    /* Set the volume */
+    set_volume(data, volume);
+
+    pw_log_info("MIDI CC%d: Volume set to %.2f", controller, volume);
+  }
 
   default:
     pw_log_debug("Unhandled CC: controller=%d, value=%d", controller, value);
