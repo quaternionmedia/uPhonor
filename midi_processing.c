@@ -119,19 +119,27 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
        * CC value 0 = quarter speed (0.25x)
        * CC value 127 = quadruple speed (4.0x)
        */
-      float normalized_value = (float)value / 127.0f;
+      float new_speed;
       
-      /* Map 0-1 range to 0.25-4.0 range with 64/127 being 1.0 */
+      /* Map CC value to speed with center detent at 64 */
       if (value < 64) {
         /* Map 0-63 to 0.25-1.0 */
-        data->playback_speed = 0.25f + (normalized_value * 64.0f / 127.0f) * 0.75f;
+        new_speed = 0.25f + ((float)value / 63.0f) * 0.75f;
       } else {
         /* Map 64-127 to 1.0-4.0 */
-        data->playback_speed = 1.0f + ((normalized_value - 64.0f / 127.0f) * 127.0f / 63.0f) * 3.0f;
+        new_speed = 1.0f + ((float)(value - 64) / 63.0f) * 3.0f;
       }
       
-      pw_log_info("Playback speed set to %.2fx (CC%d = %d)", 
-                  data->playback_speed, controller, value);
+      /* Use the proper speed setting function that handles rubberband */
+      set_playback_speed(data, new_speed);
+      
+      /* Auto-enable rubberband for speed changes (preserve pitch) */
+      if (new_speed != 1.0f) {
+        set_rubberband_enabled(data, true);
+        pw_log_info("MIDI CC%d: Speed %.2fx (rubberband auto-enabled)", controller, new_speed);
+      } else {
+        pw_log_info("MIDI CC%d: Speed %.2fx (normal)", controller, new_speed);
+      }
     }
     break;
     
