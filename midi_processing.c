@@ -2,6 +2,7 @@
 #include "holo.c"
 
 #define PERIOD_NSEC (SPA_NSEC_PER_SEC / 8)
+#define SPEED_CC_NUMBER 74  /* MIDI CC 74 for playback speed control */
 
 void handle_midi_message(struct data *data, uint8_t *midi_data)
 {
@@ -36,6 +37,11 @@ void handle_midi_message(struct data *data, uint8_t *midi_data)
 
   case 0xB0: // Control Change
     pw_log_debug("Control Change message received: 0x%02x", *midi_data);
+    {
+      uint8_t controller = *(midi_data + 1);
+      uint8_t value = *(midi_data + 2);
+      handle_control_change(data, channel, controller, value);
+    }
     break;
 
   case 0xC0: // Program Change
@@ -100,6 +106,39 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
 {
   // Currently not handling note off specifically
   // Could be used for future functionality
+}
+
+void handle_control_change(struct data *data, uint8_t channel, uint8_t controller, uint8_t value)
+{
+  switch (controller)
+  {
+  case SPEED_CC_NUMBER:
+    {
+      /* Convert MIDI CC value (0-127) to playback speed (0.25x to 4.0x) */
+      /* CC value 64 = normal speed (1.0x)
+       * CC value 0 = quarter speed (0.25x)
+       * CC value 127 = quadruple speed (4.0x)
+       */
+      float normalized_value = (float)value / 127.0f;
+      
+      /* Map 0-1 range to 0.25-4.0 range with 64/127 being 1.0 */
+      if (value < 64) {
+        /* Map 0-63 to 0.25-1.0 */
+        data->playback_speed = 0.25f + (normalized_value * 64.0f / 127.0f) * 0.75f;
+      } else {
+        /* Map 64-127 to 1.0-4.0 */
+        data->playback_speed = 1.0f + ((normalized_value - 64.0f / 127.0f) * 127.0f / 63.0f) * 3.0f;
+      }
+      
+      pw_log_info("Playback speed set to %.2fx (CC%d = %d)", 
+                  data->playback_speed, controller, value);
+    }
+    break;
+    
+  default:
+    pw_log_debug("Unhandled CC: controller=%d, value=%d", controller, value);
+    break;
+  }
 }
 
 void parse_midi_sequence(struct data *data, struct spa_pod_sequence *seq)

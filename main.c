@@ -25,6 +25,8 @@ int main(int argc, char *argv[])
   data.record_filename = NULL;
 
   data.volume = 1.0f; // Default volume level
+  data.playback_speed = 1.0f; // Default normal speed
+  data.sample_position = 0.0; // Initialize fractional sample position
 
   data.current_state = HOLO_STATE_IDLE;
   // Initialize performance buffers (add after data initialization)
@@ -169,8 +171,8 @@ int main(int argc, char *argv[])
 
   if (pw_filter_connect(data.filter,
                         PW_FILTER_FLAG_RT_PROCESS,
-                        params,
-                        1) < 0)
+                        NULL,
+                        0) < 0)
   {
     fprintf(stderr, "can't connect\n");
     return -1;

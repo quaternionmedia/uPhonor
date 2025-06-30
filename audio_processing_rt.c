@@ -89,11 +89,12 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   if (data->reset_audio)
   {
     sf_seek(data->file, 0, SEEK_SET);
+    data->sample_position = 0.0;  /* Reset fractional position for variable speed */
     data->reset_audio = false;
   }
 
-  /* Read audio data optimized for mono output */
-  sf_count_t frames_read = read_audio_frames_rt(data, buf, n_samples);
+  /* Read audio data with variable speed playback */
+  sf_count_t frames_read = read_audio_frames_variable_speed_rt(data, buf, n_samples);
 
   /* Apply volume (RT-optimized) */
   apply_volume_rt(buf, frames_read, data->volume);
@@ -202,6 +203,106 @@ sf_count_t read_audio_frames_rt(struct data *data, float *buf, uint32_t n_sample
   }
 
   return frames_read;
+}
+
+sf_count_t read_audio_frames_variable_speed_rt(struct data *data, float *buf, uint32_t n_samples)
+{
+  if (data->playback_speed <= 0.0f || data->playback_speed > 10.0f)
+  {
+    /* Invalid speed, use normal speed as fallback */
+    data->playback_speed = 1.0f;
+  }
+
+  if (data->playback_speed == 1.0f)
+  {
+    /* Normal speed - use the optimized path */
+    return read_audio_frames_rt(data, buf, n_samples);
+  }
+
+  /* Variable speed playback using linear interpolation */
+  sf_count_t total_frames = data->fileinfo.frames;
+  uint32_t output_frames = 0;
+
+  for (uint32_t i = 0; i < n_samples && output_frames < n_samples; i++)
+  {
+    /* Get integer and fractional parts of sample position */
+    sf_count_t sample_index = (sf_count_t)data->sample_position;
+    double frac = data->sample_position - sample_index;
+
+    /* Handle looping */
+    if (sample_index >= total_frames)
+    {
+      data->sample_position = fmod(data->sample_position, total_frames);
+      sample_index = (sf_count_t)data->sample_position;
+      frac = data->sample_position - sample_index;
+      sf_seek(data->file, sample_index, SEEK_SET);
+    }
+
+    /* Read current and next samples for interpolation */
+    float current_sample = 0.0f;
+    float next_sample = 0.0f;
+
+    if (data->fileinfo.channels == 1)
+    {
+      /* Mono file - direct read */
+      sf_seek(data->file, sample_index, SEEK_SET);
+      sf_readf_float(data->file, &current_sample, 1);
+
+      if (sample_index + 1 < total_frames)
+      {
+        sf_readf_float(data->file, &next_sample, 1);
+      }
+      else
+      {
+        /* End of file - use first sample for looping */
+        sf_seek(data->file, 0, SEEK_SET);
+        sf_readf_float(data->file, &next_sample, 1);
+      }
+    }
+    else
+    {
+      /* Multi-channel file - extract first channel */
+      float temp_buffer[data->fileinfo.channels];
+
+      sf_seek(data->file, sample_index, SEEK_SET);
+      if (sf_readf_float(data->file, temp_buffer, 1) == 1)
+      {
+        current_sample = temp_buffer[0];
+      }
+
+      if (sample_index + 1 < total_frames)
+      {
+        if (sf_readf_float(data->file, temp_buffer, 1) == 1)
+        {
+          next_sample = temp_buffer[0];
+        }
+      }
+      else
+      {
+        /* End of file - use first sample for looping */
+        sf_seek(data->file, 0, SEEK_SET);
+        if (sf_readf_float(data->file, temp_buffer, 1) == 1)
+        {
+          next_sample = temp_buffer[0];
+        }
+      }
+    }
+
+    /* Linear interpolation */
+    buf[output_frames] = current_sample + (next_sample - current_sample) * frac;
+    output_frames++;
+
+    /* Advance sample position by speed multiplier */
+    data->sample_position += data->playback_speed;
+  }
+
+  /* Fill remaining buffer with silence if needed */
+  for (uint32_t i = output_frames; i < n_samples; i++)
+  {
+    buf[i] = 0.0f;
+  }
+
+  return output_frames;
 }
 
 int start_recording_rt(struct data *data, const char *filename)
