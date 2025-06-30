@@ -17,5 +17,11 @@ int start_playing(struct data *data, const char *filename)
     pw_log_error("failed to open file: %s", filename);
     return -1;
   }
+
+  /* Reset rubberband when loading a new file */
+  if (data->rubberband_state) {
+    rubberband_reset_data(data);
+  }
+
   return 0;
 }

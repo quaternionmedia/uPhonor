@@ -18,6 +18,7 @@
 #include <sndfile.h>
 #include <spa/param/audio/format-utils.h>
 #include <sys/stat.h>
+#include <rubberband/rubberband-c.h>
 #include "rt_nonrt_bridge.h"
 
 struct port
@@ -71,10 +72,7 @@ struct data
     HOLO_STATE_RECORDING,
     HOLO_STATE_PLAYING,
     HOLO_STATE_STOPPED
-  };
-
-  /* Current Holophonor state */
-  enum holo_state current_state;
+  } current_state;
 
   /* Flag to reset audio playback on loop sync */
   bool reset_audio;
@@ -84,6 +82,14 @@ struct data
   float playback_speed;
   /* Fractional sample position for variable speed playback */
   double sample_position;
+
+  /* Rubberband time-stretching and pitch-shifting */
+  RubberBandState rubberband_state;
+  float pitch_shift;        /* Pitch shift in semitones (12 = one octave up, -12 = one octave down) */
+  bool rubberband_enabled;  /* Whether to use rubberband processing */
+  float *rubberband_input_buffer;  /* Input buffer for rubberband */
+  float *rubberband_output_buffer; /* Output buffer for rubberband */
+  uint32_t rubberband_buffer_size; /* Size of rubberband buffers */
 
   /* RT/Non-RT bridge for performance-critical operations */
   struct rt_nonrt_bridge rt_bridge;
@@ -103,7 +109,14 @@ void process_loops(struct data *data, struct spa_io_position *position, float vo
 /* Utility functions */
 void set_volume(struct data *data, float new_volume);
 void set_playback_speed(struct data *data, float new_speed);
+void set_pitch_shift(struct data *data, float semitones);
+void set_rubberband_enabled(struct data *data, bool enabled);
 float linear_to_db_volume(float linear_volume);
+
+/* Rubberband functions */
+int init_rubberband(struct data *data);
+void cleanup_rubberband(struct data *data);
+void rubberband_reset_data(struct data *data);
 
 void state_changed(void *userdata, enum pw_filter_state old,
                    enum pw_filter_state state, const char *error);

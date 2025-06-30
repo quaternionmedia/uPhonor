@@ -21,4 +21,13 @@ static void on_param_changed(void *userdata, uint32_t id, const struct spa_pod *
 
   pw_log_info("  rate:%d channels:%d\n",
               data->format.info.raw.rate, data->format.info.raw.channels);
+
+  /* Initialize rubberband now that we have format information */
+  if (!data->rubberband_state && data->format.info.raw.rate > 0) {
+    if (init_rubberband(data) < 0) {
+      pw_log_warn("Failed to initialize rubberband");
+    } else {
+      pw_log_info("Rubberband initialized successfully");
+    }
+  }
 }

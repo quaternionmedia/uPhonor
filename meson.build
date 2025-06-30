@@ -10,6 +10,7 @@ pipewire = dependency('libpipewire-0.3')
 sndfile = dependency('sndfile')
 alsa = dependency('alsa')
 threads = dependency('threads')
+rubberband = dependency('rubberband')
 
 # sources
 uphonor_sources = [
@@ -21,10 +22,12 @@ uphonor_sources = [
   'midi_processing.c', 
   'buffer_manager.c',
   'record.c',
+  'rubberband_processing.c',
+  'utils.c',
 ]
 
 # exes
-executable('uphonor', uphonor_sources, dependencies : [pipewire, sndfile, alsa, math, threads], install : true)
+executable('uphonor', uphonor_sources, dependencies : [pipewire, sndfile, alsa, math, threads, rubberband], install : true)
 
 # examples
 # executable('midi', 'examples/midi.c', dependencies : [pipewire, alsa], install : true)

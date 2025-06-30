@@ -1,5 +1,5 @@
 #include "uphonor.h"
-#include "cli.c"
+#include "cli_rubberband.c"
 #include "pipe.c"
 #include "process.c"
 #include "audio_processing_rt.h"
@@ -58,6 +58,15 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Failed to allocate audio buffers\n");
     return -1;
   }
+
+  /* Initialize rubberband after we have format information */
+  /* Note: We'll initialize this later when we have proper format info */
+  data.rubberband_state = NULL;
+  data.pitch_shift = 0.0f;
+  data.rubberband_enabled = false;
+  data.rubberband_input_buffer = NULL;
+  data.rubberband_output_buffer = NULL;
+  data.rubberband_buffer_size = 0;
   /* Set up buffer parameters for audio */
   const struct spa_pod *params[1];
   uint8_t buffer[1024];
@@ -210,6 +219,9 @@ int main(int argc, char *argv[])
   // Free performance buffers
   free(data.silence_buffer);
   free(data.temp_audio_buffer);
+
+  // Clean up rubberband
+  cleanup_rubberband(&data);
 
   return 0;
 }

@@ -94,7 +94,12 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   }
 
   /* Read audio data with variable speed playback */
-  sf_count_t frames_read = read_audio_frames_variable_speed_rt(data, buf, n_samples);
+  sf_count_t frames_read;
+  if (data->rubberband_enabled && data->rubberband_state) {
+    frames_read = read_audio_frames_rubberband_rt(data, buf, n_samples);
+  } else {
+    frames_read = read_audio_frames_variable_speed_rt(data, buf, n_samples);
+  }
 
   /* Apply volume (RT-optimized) */
   apply_volume_rt(buf, frames_read, data->volume);
@@ -354,4 +359,75 @@ int stop_recording_rt(struct data *data)
   }
 
   return 0;
+}
+
+sf_count_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t n_samples)
+{
+  if (!data->rubberband_enabled || !data->rubberband_state) {
+    /* Fallback to variable speed if rubberband is disabled */
+    return read_audio_frames_variable_speed_rt(data, buf, n_samples);
+  }
+
+  /* Update rubberband parameters if playback speed changed */
+  static float last_speed = 1.0f;
+  if (data->playback_speed != last_speed) {
+    rubberband_set_time_ratio(data->rubberband_state, 1.0 / data->playback_speed);
+    last_speed = data->playback_speed;
+  }
+
+  uint32_t total_output = 0;
+  uint32_t remaining = n_samples;
+
+  while (remaining > 0 && total_output < n_samples) {
+    /* Check how many samples rubberband needs */
+    int required = rubberband_get_samples_required(data->rubberband_state);
+    
+    if (required > 0) {
+      /* Read input samples from file */
+      uint32_t to_read = (uint32_t)required;
+      if (to_read > data->rubberband_buffer_size) {
+        to_read = data->rubberband_buffer_size;
+      }
+
+      sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, to_read);
+      
+      if (frames_read > 0) {
+        /* Feed samples to rubberband */
+        const float *input_ptr = data->rubberband_input_buffer;
+        rubberband_process(data->rubberband_state, &input_ptr, (size_t)frames_read, 0);
+      }
+    }
+
+    /* Try to retrieve processed samples */
+    int available = rubberband_available(data->rubberband_state);
+    if (available > 0) {
+      uint32_t to_retrieve = (uint32_t)available;
+      if (to_retrieve > remaining) {
+        to_retrieve = remaining;
+      }
+      if (to_retrieve > data->rubberband_buffer_size) {
+        to_retrieve = data->rubberband_buffer_size;
+      }
+
+      float *output_ptr = data->rubberband_output_buffer;
+      size_t retrieved = rubberband_retrieve(data->rubberband_state, &output_ptr, to_retrieve);
+      
+      /* Copy to output buffer */
+      for (size_t i = 0; i < retrieved && total_output < n_samples; i++) {
+        buf[total_output++] = data->rubberband_output_buffer[i];
+      }
+      
+      remaining = n_samples - total_output;
+    } else {
+      /* No samples available, break to avoid infinite loop */
+      break;
+    }
+  }
+
+  /* Fill remaining buffer with silence if needed */
+  for (uint32_t i = total_output; i < n_samples; i++) {
+    buf[i] = 0.0f;
+  }
+
+  return total_output;
 }
