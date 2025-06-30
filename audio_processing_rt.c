@@ -361,13 +361,22 @@ int stop_recording_rt(struct data *data)
   return 0;
 }
 
-sf_count_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t n_samples)
+uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t n_samples)
 {
+  /* Debug: One-time state check at first call */
+  static bool first_call = true;
+  if (first_call) {
+    pw_log_info("DEBUG: First rubberband call - enabled: %s, state: %s", 
+           data->rubberband_enabled ? "true" : "false",
+           data->rubberband_state ? "valid" : "NULL");
+    first_call = false;
+  }
+
   if (!data->rubberband_enabled || !data->rubberband_state) {
     /* Debug: Print why we're falling back */
     static int debug_count = 0;
     if (debug_count < 5) {  /* Limit debug output to avoid spam */
-      printf("DEBUG: Rubberband fallback - enabled: %s, state: %s\n", 
+      pw_log_info("DEBUG: Rubberband fallback - enabled: %s, state: %s", 
              data->rubberband_enabled ? "true" : "false",
              data->rubberband_state ? "valid" : "NULL");
       debug_count++;
@@ -379,10 +388,16 @@ sf_count_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32
   /* Update rubberband parameters if playback speed changed */
   static float last_speed = 1.0f;
   static float last_pitch = 0.0f;
+  static int param_debug_count = 0;
   
   if (data->playback_speed != last_speed) {
     /* Set time ratio for speed changes (inverse of playback speed) */
-    rubberband_set_time_ratio(data->rubberband_state, 1.0 / data->playback_speed);
+    double time_ratio = 1.0 / data->playback_speed;
+    rubberband_set_time_ratio(data->rubberband_state, time_ratio);
+    if (param_debug_count < 3) {
+      pw_log_info("DEBUG: Set time ratio to %.3f (speed %.2f)", time_ratio, data->playback_speed);
+      param_debug_count++;
+    }
     last_speed = data->playback_speed;
   }
   
@@ -390,9 +405,15 @@ sf_count_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32
     /* Set pitch scale for pitch changes, ensuring 1.0 means no pitch change */
     if (data->pitch_shift == 0.0f) {
       rubberband_set_pitch_scale(data->rubberband_state, 1.0);
+      if (param_debug_count < 3) {
+        pw_log_info("DEBUG: Set pitch scale to 1.0 (no pitch shift)");
+      }
     } else {
       float pitch_scale = powf(2.0f, data->pitch_shift / 12.0f);
       rubberband_set_pitch_scale(data->rubberband_state, pitch_scale);
+      if (param_debug_count < 3) {
+        pw_log_info("DEBUG: Set pitch scale to %.3f (%.2f semitones)", pitch_scale, data->pitch_shift);
+      }
     }
     last_pitch = data->pitch_shift;
   }
