@@ -94,6 +94,9 @@ void set_pitch_shift(struct data *data, float semitones)
             float pitch_scale = powf(2.0f, semitones / 12.0f);
             rubberband_set_pitch_scale(data->rubberband_state, pitch_scale);
         }
+        
+        /* Reset rubberband for immediate response to pitch changes */
+        rubberband_reset(data->rubberband_state);
     }
 }
 

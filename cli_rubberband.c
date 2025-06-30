@@ -13,6 +13,10 @@ void print_usage(const char *program_name)
   printf("  --rubberband           Force enable rubberband processing\n");
   printf("  --no-rubberband        Disable rubberband (old-style speed/pitch coupling)\n");
   printf("  --help                 Show this help message\n");
+  printf("\nMIDI Control:\n");
+  printf("  CC 74                  Real-time playback speed control (0.25x - 4.0x)\n");
+  printf("  CC 75                  Real-time pitch shift control (-12 to +12 semitones)\n");
+  printf("  Note: Rubberband is auto-enabled when MIDI controls are used\n");
   printf("\nExamples:\n");
   printf("  %s myfile.wav --pitch 3 --rubberband\n", program_name);
   printf("  %s myfile.wav --speed 1.5 --pitch -2\n", program_name);

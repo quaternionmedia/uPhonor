@@ -3,6 +3,7 @@
 
 #define PERIOD_NSEC (SPA_NSEC_PER_SEC / 8)
 #define SPEED_CC_NUMBER 74  /* MIDI CC 74 for playback speed control */
+#define PITCH_CC_NUMBER 75  /* MIDI CC 75 for pitch shift control */
 
 void handle_midi_message(struct data *data, uint8_t *midi_data)
 {
@@ -139,6 +140,37 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
         pw_log_info("MIDI CC%d: Speed %.2fx (rubberband auto-enabled)", controller, new_speed);
       } else {
         pw_log_info("MIDI CC%d: Speed %.2fx (normal)", controller, new_speed);
+      }
+    }
+    break;
+    
+  case PITCH_CC_NUMBER:
+    {
+      /* Convert MIDI CC value (0-127) to pitch shift (-12 to +12 semitones) */
+      /* CC value 64 = no pitch shift (0 semitones)
+       * CC value 0 = -12 semitones (one octave down)
+       * CC value 127 = +12 semitones (one octave up)
+       */
+      float pitch_shift;
+      
+      /* Map CC value to pitch shift with center detent at 64 */
+      if (value < 64) {
+        /* Map 0-63 to -12.0 to 0.0 semitones */
+        pitch_shift = -12.0f + ((float)value / 63.0f) * 12.0f;
+      } else {
+        /* Map 64-127 to 0.0 to +12.0 semitones */
+        pitch_shift = ((float)(value - 64) / 63.0f) * 12.0f;
+      }
+      
+      /* Use the pitch shift function */
+      set_pitch_shift(data, pitch_shift);
+      
+      /* Auto-enable rubberband for pitch changes */
+      if (pitch_shift != 0.0f) {
+        set_rubberband_enabled(data, true);
+        pw_log_info("MIDI CC%d: Pitch shift %.2f semitones (rubberband auto-enabled)", controller, pitch_shift);
+      } else {
+        pw_log_info("MIDI CC%d: Pitch shift %.2f semitones (normal)", controller, pitch_shift);
       }
     }
     break;
