@@ -370,9 +370,23 @@ sf_count_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32
 
   /* Update rubberband parameters if playback speed changed */
   static float last_speed = 1.0f;
+  static float last_pitch = 0.0f;
+  
   if (data->playback_speed != last_speed) {
+    /* Set time ratio for speed changes (inverse of playback speed) */
     rubberband_set_time_ratio(data->rubberband_state, 1.0 / data->playback_speed);
     last_speed = data->playback_speed;
+  }
+  
+  if (data->pitch_shift != last_pitch) {
+    /* Set pitch scale for pitch changes, ensuring 1.0 means no pitch change */
+    if (data->pitch_shift == 0.0f) {
+      rubberband_set_pitch_scale(data->rubberband_state, 1.0);
+    } else {
+      float pitch_scale = powf(2.0f, data->pitch_shift / 12.0f);
+      rubberband_set_pitch_scale(data->rubberband_state, pitch_scale);
+    }
+    last_pitch = data->pitch_shift;
   }
 
   uint32_t total_output = 0;

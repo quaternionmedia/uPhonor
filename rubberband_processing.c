@@ -17,8 +17,8 @@ int init_rubberband(struct data *data)
         RubberBandOptionProcessRealTime |  /* realtime processing */
         RubberBandOptionTransientsCrisp |  /* crisp transients */
         RubberBandOptionThreadingNever,    /* no threading in RT context */
-        1.0,                   /* initial time ratio */
-        1.0                    /* initial pitch scale */
+        1.0,                   /* initial time ratio (no speed change) */
+        1.0                    /* initial pitch scale (no pitch change) */
     );
 
     if (!data->rubberband_state) {
@@ -84,9 +84,14 @@ void set_pitch_shift(struct data *data, float semitones)
     data->pitch_shift = semitones;
 
     if (data->rubberband_state) {
-        /* Convert semitones to pitch scale (2^(semitones/12)) */
-        float pitch_scale = powf(2.0f, semitones / 12.0f);
-        rubberband_set_pitch_scale(data->rubberband_state, pitch_scale);
+        if (semitones == 0.0f) {
+            /* Explicitly set pitch scale to 1.0 for no pitch shift */
+            rubberband_set_pitch_scale(data->rubberband_state, 1.0);
+        } else {
+            /* Convert semitones to pitch scale (2^(semitones/12)) */
+            float pitch_scale = powf(2.0f, semitones / 12.0f);
+            rubberband_set_pitch_scale(data->rubberband_state, pitch_scale);
+        }
     }
 }
 
@@ -99,13 +104,20 @@ void set_rubberband_enabled(struct data *data, bool enabled)
     bool was_enabled = data->rubberband_enabled;
     data->rubberband_enabled = enabled;
 
-    /* If we're enabling rubberband, reset it */
+    /* If we're enabling rubberband, reset it and configure parameters */
     if (enabled && !was_enabled && data->rubberband_state) {
         rubberband_reset(data->rubberband_state);
         
-        /* Update time and pitch ratios */
+        /* Set time ratio for speed changes (inverse of playback speed) */
         rubberband_set_time_ratio(data->rubberband_state, 1.0 / data->playback_speed);
+        
+        /* Set pitch scale for pitch shifts (separate from speed) */
         float pitch_scale = powf(2.0f, data->pitch_shift / 12.0f);
         rubberband_set_pitch_scale(data->rubberband_state, pitch_scale);
+        
+        /* For speed-only changes, ensure pitch scale is exactly 1.0 to preserve pitch */
+        if (data->pitch_shift == 0.0f && data->playback_speed != 1.0f) {
+            rubberband_set_pitch_scale(data->rubberband_state, 1.0);
+        }
     }
 }
