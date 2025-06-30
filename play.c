@@ -19,21 +19,28 @@ int start_playing(struct data *data, const char *filename)
   }
 
   /* Initialize or reset rubberband when loading a new file */
-  if (data->rubberband_state) {
+  if (data->rubberband_state)
+  {
     rubberband_reset_data(data);
-  } else if (data->rubberband_enabled) {
+  }
+  else if (data->rubberband_enabled)
+  {
     /* Set up format info so rubberband can initialize properly */
-    if (data->format.info.raw.rate == 0) {
+    if (data->format.info.raw.rate == 0)
+    {
       data->format.info.raw.rate = data->fileinfo.samplerate;
       data->format.info.raw.channels = 1; /* We convert to mono */
     }
-    
+
     /* Initialize rubberband with file sample rate */
     pw_log_info("DEBUG: Initializing rubberband with file sample rate %d", data->fileinfo.samplerate);
-    if (init_rubberband(data) == 0) {
+    if (init_rubberband(data) == 0)
+    {
       pw_log_info("Rubberband initialized successfully with file format");
-      pw_log_info("DEBUG: Rubberband initialized successfully, state: %p", (void*)data->rubberband_state);
-    } else {
+      pw_log_info("DEBUG: Rubberband initialized successfully, state: %p", (void *)data->rubberband_state);
+    }
+    else
+    {
       pw_log_warn("Failed to initialize rubberband with file format");
       pw_log_warn("DEBUG: Rubberband initialization FAILED");
     }

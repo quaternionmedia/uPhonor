@@ -85,8 +85,8 @@ struct data
 
   /* Rubberband time-stretching and pitch-shifting */
   RubberBandState rubberband_state;
-  float pitch_shift;        /* Pitch shift in semitones (12 = one octave up, -12 = one octave down) */
-  bool rubberband_enabled;  /* Whether to use rubberband processing */
+  float pitch_shift;               /* Pitch shift in semitones (12 = one octave up, -12 = one octave down) */
+  bool rubberband_enabled;         /* Whether to use rubberband processing */
   float *rubberband_input_buffer;  /* Input buffer for rubberband */
   float *rubberband_output_buffer; /* Output buffer for rubberband */
   uint32_t rubberband_buffer_size; /* Size of rubberband buffers */
