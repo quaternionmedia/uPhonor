@@ -95,6 +95,16 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
 
   /* Read audio data with variable speed playback */
   sf_count_t frames_read;
+  
+  /* Debug: Check which audio processing path is taken */
+  static bool debug_path_logged = false;
+  if (!debug_path_logged) {
+    pw_log_info("DEBUG: Audio processing path - rubberband_enabled: %s, rubberband_state: %s", 
+           data->rubberband_enabled ? "true" : "false",
+           data->rubberband_state ? "valid" : "NULL");
+    debug_path_logged = true;
+  }
+  
   if (data->rubberband_enabled && data->rubberband_state) {
     frames_read = read_audio_frames_rubberband_rt(data, buf, n_samples);
   } else {
