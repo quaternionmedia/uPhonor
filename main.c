@@ -190,6 +190,10 @@ int main(int argc, char *argv[])
   int cli_status = cli(argc, argv, &data);
   if (cli_status != 0)
   {
+    if (cli_status == 1) {
+      // Help was shown, exit normally
+      return 0;
+    }
     fprintf(stderr, "Error in command line interface: %d\n", cli_status);
     return cli_status;
   }

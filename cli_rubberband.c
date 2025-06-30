@@ -8,12 +8,15 @@ void print_usage(const char *program_name)
     printf("Usage: %s <audiofile> [options]\n", program_name);
     printf("Options:\n");
     printf("  --pitch <semitones>    Set pitch shift in semitones (-12 to +12)\n");
-    printf("  --speed <ratio>        Set playback speed (0.5 to 2.0)\n");
-    printf("  --rubberband           Enable rubberband processing\n");
+    printf("  --speed <ratio>        Set playback speed (0.1 to 10.0)\n");
+    printf("                         (automatically enables rubberband to preserve pitch)\n");
+    printf("  --rubberband           Force enable rubberband processing\n");
+    printf("  --no-rubberband        Disable rubberband (old-style speed/pitch coupling)\n");
     printf("  --help                 Show this help message\n");
     printf("\nExamples:\n");
     printf("  %s myfile.wav --pitch 3 --rubberband\n", program_name);
-    printf("  %s myfile.wav --speed 1.5 --pitch -2 --rubberband\n", program_name);
+    printf("  %s myfile.wav --speed 1.5 --pitch -2\n", program_name);
+    printf("  %s myfile.wav --speed 2.0 --no-rubberband\n", program_name);
 }
 
 int parse_rubberband_args(int argc, char **argv, struct data *data)
@@ -30,7 +33,14 @@ int parse_rubberband_args(int argc, char **argv, struct data *data)
                 return -1;
             }
             set_pitch_shift(data, pitch);
-            printf("Set pitch shift to %.2f semitones\n", pitch);
+            
+            /* Automatically enable rubberband when pitch != 0.0 */
+            if (pitch != 0.0f) {
+                set_rubberband_enabled(data, true);
+                printf("Set pitch shift to %.2f semitones (rubberband auto-enabled)\n", pitch);
+            } else {
+                printf("Set pitch shift to %.2f semitones\n", pitch);
+            }
         } else if (strcmp(argv[i], "--speed") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "Error: --speed requires a value\n");
@@ -42,10 +52,20 @@ int parse_rubberband_args(int argc, char **argv, struct data *data)
                 return -1;
             }
             set_playback_speed(data, speed);
-            printf("Set playback speed to %.2f\n", speed);
+            
+            /* Automatically enable rubberband when speed != 1.0 to preserve pitch */
+            if (speed != 1.0f) {
+                set_rubberband_enabled(data, true);
+                printf("Set playback speed to %.2f (rubberband auto-enabled to preserve pitch)\n", speed);
+            } else {
+                printf("Set playback speed to %.2f\n", speed);
+            }
         } else if (strcmp(argv[i], "--rubberband") == 0) {
             set_rubberband_enabled(data, true);
             printf("Enabled rubberband processing\n");
+        } else if (strcmp(argv[i], "--no-rubberband") == 0) {
+            set_rubberband_enabled(data, false);
+            printf("Disabled rubberband processing (old-style speed/pitch coupling)\n");
         } else if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 1;
@@ -61,6 +81,11 @@ int parse_rubberband_args(int argc, char **argv, struct data *data)
 /* Enhanced CLI with rubberband controls */
 int cli(int argc, char **argv, struct data *data)
 {
+    if (argc > 1 && strcmp(argv[1], "--help") == 0) {
+        print_usage(argv[0]);
+        return 1;
+    }
+    
     pw_log_info("Command line interface initialized with %d arguments", argc);
     
     if (argc == 1) {
@@ -68,11 +93,6 @@ int cli(int argc, char **argv, struct data *data)
         printf("No audio file specified. Starting in idle mode.\n");
         printf("Use --help for usage information.\n");
         return 0;
-    }
-
-    if (argc > 1 && strcmp(argv[1], "--help") == 0) {
-        print_usage(argv[0]);
-        return 1;
     }
 
     /* Default values */
