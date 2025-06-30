@@ -39,7 +39,7 @@ int init_rubberband(struct data *data)
 
     /* Initialize default values */
     data->pitch_shift = 0.0f;        /* No pitch shift initially */
-    data->rubberband_enabled = false; /* Disabled by default */
+    /* Note: Do NOT reset rubberband_enabled here - it should be preserved from CLI settings */
 
     return 0;
 }
