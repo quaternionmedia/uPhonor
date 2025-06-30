@@ -10,13 +10,15 @@ int init_rubberband(struct data *data)
     /* Get sample rate from format info */
     uint32_t sample_rate = data->format.info.raw.rate > 0 ? data->format.info.raw.rate : 48000;
     
-    /* Create rubberband state for realtime processing */
+    /* Create rubberband state for realtime processing with low latency */
     data->rubberband_state = rubberband_new(
         sample_rate,           /* sample rate */
         1,                     /* channels (mono) */
-        RubberBandOptionProcessRealTime |  /* realtime processing */
-        RubberBandOptionTransientsCrisp |  /* crisp transients */
-        RubberBandOptionThreadingNever,    /* no threading in RT context */
+        RubberBandOptionProcessRealTime |      /* realtime processing */
+        RubberBandOptionTransientsCrisp |      /* crisp transients */
+        RubberBandOptionThreadingNever |       /* no threading in RT context */
+        RubberBandOptionWindowShort |          /* shorter analysis window for lower latency */
+        RubberBandOptionFormantShifted,        /* allow formant shifting for better responsiveness */
         1.0,                   /* initial time ratio (no speed change) */
         1.0                    /* initial pitch scale (no pitch change) */
     );

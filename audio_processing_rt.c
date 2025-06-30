@@ -404,8 +404,12 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
     /* Set time ratio for speed changes (inverse of playback speed) */
     double time_ratio = 1.0 / data->playback_speed;
     rubberband_set_time_ratio(data->rubberband_state, time_ratio);
+    
+    /* Reset rubberband to make speed changes more immediate */
+    rubberband_reset(data->rubberband_state);
+    
     if (param_debug_count < 3) {
-      pw_log_info("DEBUG: Set time ratio to %.3f (speed %.2f)", time_ratio, data->playback_speed);
+      pw_log_info("DEBUG: Set time ratio to %.3f (speed %.2f) - reset for immediate response", time_ratio, data->playback_speed);
       param_debug_count++;
     }
     last_speed = data->playback_speed;
