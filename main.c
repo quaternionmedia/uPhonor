@@ -24,7 +24,7 @@ int main(int argc, char *argv[])
   data.record_file = NULL;
   data.record_filename = NULL;
 
-  data.volume = 1.0f; // Default volume level
+  data.volume = 1.0f;         // Default volume level
   data.playback_speed = 1.0f; // Default normal speed
   data.sample_position = 0.0; // Initialize fractional sample position
 
@@ -63,7 +63,7 @@ int main(int argc, char *argv[])
   /* Note: We'll initialize this later when we have proper format info */
   data.rubberband_state = NULL;
   data.pitch_shift = 0.0f;
-  data.rubberband_enabled = false;
+  data.rubberband_enabled = true;
   data.rubberband_input_buffer = NULL;
   data.rubberband_output_buffer = NULL;
   data.rubberband_buffer_size = 0;
@@ -190,7 +190,8 @@ int main(int argc, char *argv[])
   int cli_status = cli(argc, argv, &data);
   if (cli_status != 0)
   {
-    if (cli_status == 1) {
+    if (cli_status == 1)
+    {
       // Help was shown, exit normally
       return 0;
     }
