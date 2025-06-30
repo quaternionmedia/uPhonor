@@ -447,6 +447,25 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
   uint32_t total_output = 0;
   uint32_t remaining = n_samples;
 
+  /* Prime the rubberband with some initial data if it's empty */
+  int available = rubberband_available(data->rubberband_state);
+  if (available == 0)
+  {
+    /* Feed some initial samples to get rubberband started */
+    uint32_t prime_size = 256; /* Small prime buffer */
+    if (prime_size > data->rubberband_buffer_size)
+    {
+      prime_size = data->rubberband_buffer_size;
+    }
+
+    sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, prime_size);
+    if (frames_read > 0)
+    {
+      const float *input_ptr = data->rubberband_input_buffer;
+      rubberband_process(data->rubberband_state, &input_ptr, (size_t)frames_read, 0);
+    }
+  }
+
   while (remaining > 0 && total_output < n_samples)
   {
     /* Check how many samples rubberband needs */
@@ -454,8 +473,12 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
 
     if (required > 0)
     {
-      /* Read input samples from file */
+      /* Read input samples from file, but limit to smaller chunks for lower latency */
       uint32_t to_read = (uint32_t)required;
+      if (to_read > 256) /* Limit chunk size for lower latency */
+      {
+        to_read = 256;
+      }
       if (to_read > data->rubberband_buffer_size)
       {
         to_read = data->rubberband_buffer_size;
@@ -472,7 +495,7 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
     }
 
     /* Try to retrieve processed samples */
-    int available = rubberband_available(data->rubberband_state);
+    available = rubberband_available(data->rubberband_state);
     if (available > 0)
     {
       uint32_t to_retrieve = (uint32_t)available;

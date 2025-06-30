@@ -11,7 +11,7 @@ int init_rubberband(struct data *data)
   /* Get sample rate from format info */
   uint32_t sample_rate = data->format.info.raw.rate > 0 ? data->format.info.raw.rate : 48000;
 
-  /* Create rubberband state for realtime processing with low latency */
+  /* Create rubberband state for realtime processing with ultra-low latency */
   data->rubberband_state = rubberband_new(
       sample_rate,                          /* sample rate */
       1,                                    /* channels (mono) */
@@ -19,7 +19,9 @@ int init_rubberband(struct data *data)
           RubberBandOptionTransientsCrisp | /* crisp transients */
           RubberBandOptionThreadingNever |  /* no threading in RT context */
           RubberBandOptionWindowShort |     /* shorter analysis window for lower latency */
-          RubberBandOptionFormantShifted,   /* allow formant shifting for better responsiveness */
+          RubberBandOptionFormantShifted |  /* allow formant shifting for better responsiveness */
+          RubberBandOptionSmoothingOff |    /* disable smoothing for lower latency */
+          RubberBandOptionPhaseIndependent, /* reduce phase artifacts that can cause latency */
       1.0,                                  /* initial time ratio (no speed change) */
       1.0                                   /* initial pitch scale (no pitch change) */
   );
@@ -29,8 +31,13 @@ int init_rubberband(struct data *data)
     return -1;
   }
 
-  /* Set up buffer sizes - use max buffer size from data structure */
-  data->rubberband_buffer_size = data->max_buffer_size > 0 ? data->max_buffer_size : 1024;
+  /* Set up buffer sizes - use smaller buffers for lower latency */
+  /* Use smaller buffer size for rubberband to reduce latency */
+  data->rubberband_buffer_size = 512; /* Smaller fixed buffer size for lower latency */
+  if (data->max_buffer_size > 0 && data->max_buffer_size < 512)
+  {
+    data->rubberband_buffer_size = data->max_buffer_size;
+  }
 
   /* Allocate input and output buffers */
   data->rubberband_input_buffer = malloc(data->rubberband_buffer_size * sizeof(float));
