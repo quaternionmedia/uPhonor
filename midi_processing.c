@@ -4,6 +4,7 @@
 #define PERIOD_NSEC (SPA_NSEC_PER_SEC / 8)
 #define SPEED_CC_NUMBER 74 /* MIDI CC 74 for playback speed control */
 #define PITCH_CC_NUMBER 75 /* MIDI CC 75 for pitch shift control */
+#define RECORD_PLAYER_CC_NUMBER 76 /* MIDI CC 76 for record player mode */
 
 void handle_midi_message(struct data *data, uint8_t *midi_data)
 {
@@ -184,6 +185,34 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
     {
       pw_log_info("MIDI CC%d: Pitch shift %.2f semitones (normal)", controller, pitch_shift);
     }
+  }
+  break;
+
+  case RECORD_PLAYER_CC_NUMBER:
+  {
+    /* Convert MIDI CC value (0-127) to record player speed/pitch factor (0.25x to 4.0x) */
+    /* CC value 64 = normal speed/pitch (1.0x)
+     * CC value 0 = quarter speed/pitch (0.25x)
+     * CC value 127 = quadruple speed/pitch (4.0x)
+     */
+    float speed_pitch_factor;
+
+    /* Map CC value to speed/pitch factor with center detent at 64 */
+    if (value < 64)
+    {
+      /* Map 0-63 to 0.25-1.0 */
+      speed_pitch_factor = 0.25f + ((float)value / 63.0f) * 0.75f;
+    }
+    else
+    {
+      /* Map 64-127 to 1.0-4.0 */
+      speed_pitch_factor = 1.0f + ((float)(value - 64) / 63.0f) * 3.0f;
+    }
+
+    /* Set record player mode (disables rubberband, links speed and pitch) */
+    set_record_player_mode(data, speed_pitch_factor);
+
+    pw_log_info("MIDI CC%d: Record player mode %.2fx speed/pitch", controller, speed_pitch_factor);
   }
   break;
 

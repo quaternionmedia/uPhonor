@@ -109,6 +109,7 @@ void process_loops(struct data *data, struct spa_io_position *position, float vo
 /* Utility functions */
 void set_volume(struct data *data, float new_volume);
 void set_playback_speed(struct data *data, float new_speed);
+void set_record_player_mode(struct data *data, float speed_pitch_factor);
 void set_pitch_shift(struct data *data, float semitones);
 void set_rubberband_enabled(struct data *data, bool enabled);
 float linear_to_db_volume(float linear_volume);

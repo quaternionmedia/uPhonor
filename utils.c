@@ -40,3 +40,23 @@ void set_playback_speed(struct data *data, float new_speed)
 
   pw_log_info("Playback speed set to %.2fx", new_speed);
 }
+
+void set_record_player_mode(struct data *data, float speed_pitch_factor)
+{
+  // Clamp speed/pitch factor to reasonable range
+  if (speed_pitch_factor < 0.1f)
+    speed_pitch_factor = 0.1f; // Minimum 0.1x
+  if (speed_pitch_factor > 8.0f)
+    speed_pitch_factor = 8.0f; // Maximum 8x
+
+  /* Disable rubberband processing */
+  set_rubberband_enabled(data, false);
+
+  /* Set playback speed (this will affect both speed and pitch in record player mode) */
+  data->playback_speed = speed_pitch_factor;
+
+  /* Reset pitch shift since it's controlled by speed in record player mode */
+  data->pitch_shift = 0.0f;
+
+  pw_log_info("Record player mode: Speed/pitch set to %.2fx (rubberband disabled)", speed_pitch_factor);
+}
