@@ -364,6 +364,14 @@ int stop_recording_rt(struct data *data)
 sf_count_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t n_samples)
 {
   if (!data->rubberband_enabled || !data->rubberband_state) {
+    /* Debug: Print why we're falling back */
+    static int debug_count = 0;
+    if (debug_count < 5) {  /* Limit debug output to avoid spam */
+      printf("DEBUG: Rubberband fallback - enabled: %s, state: %s\n", 
+             data->rubberband_enabled ? "true" : "false",
+             data->rubberband_state ? "valid" : "NULL");
+      debug_count++;
+    }
     /* Fallback to variable speed if rubberband is disabled */
     return read_audio_frames_variable_speed_rt(data, buf, n_samples);
   }
