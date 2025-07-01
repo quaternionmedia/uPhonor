@@ -408,12 +408,14 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
   static float last_speed = 1.0f;
   static float last_pitch = 0.0f;
   static int param_debug_count = 0;
+  bool params_changed = false;
 
   if (data->playback_speed != last_speed)
   {
     /* Set time ratio for speed changes (inverse of playback speed) */
     double time_ratio = 1.0 / data->playback_speed;
     rubberband_set_time_ratio(data->rubberband_state, time_ratio);
+    params_changed = true;
 
     if (param_debug_count < 3)
     {
@@ -443,7 +445,33 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
         pw_log_info("DEBUG: Set pitch scale to %.3f (%.2f semitones)", pitch_scale, data->pitch_shift);
       }
     }
+    params_changed = true;
     last_pitch = data->pitch_shift;
+  }
+
+  /* If parameters changed, reset rubberband for immediate response */
+  if (params_changed)
+  {
+    /* Reset rubberband to flush internal buffers and apply new parameters immediately */
+    rubberband_reset(data->rubberband_state);
+    if (param_debug_count < 3)
+    {
+      pw_log_info("DEBUG: Reset rubberband for immediate parameter change response");
+    }
+    
+    /* Feed extra samples to rubberband to get immediate output with new parameters */
+    uint32_t extra_size = 512; /* Feed more samples for quicker response */
+    if (extra_size > data->rubberband_buffer_size)
+    {
+      extra_size = data->rubberband_buffer_size;
+    }
+
+    sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, extra_size);
+    if (frames_read > 0)
+    {
+      const float *input_ptr = data->rubberband_input_buffer;
+      rubberband_process(data->rubberband_state, &input_ptr, (size_t)frames_read, 0);
+    }
   }
 
   uint32_t total_output = 0;
@@ -470,7 +498,7 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
 
   /* Add a safety counter to prevent infinite loops */
   int iteration_count = 0;
-  const int max_iterations = 10; /* Reasonable limit for RT processing */
+  const int max_iterations = params_changed ? 15 : 10; /* More iterations when params changed */
 
   while (remaining > 0 && total_output < n_samples && iteration_count < max_iterations)
   {

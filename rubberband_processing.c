@@ -11,17 +11,20 @@ int init_rubberband(struct data *data)
   /* Get sample rate from format info */
   uint32_t sample_rate = data->format.info.raw.rate > 0 ? data->format.info.raw.rate : 48000;
 
-  /* Create rubberband state for realtime processing with ultra-low latency */
+  /* Create rubberband state for realtime processing with ultra-low latency and maximum responsiveness */
   data->rubberband_state = rubberband_new(
       sample_rate,                          /* sample rate */
       1,                                    /* channels (mono) */
       RubberBandOptionProcessRealTime |     /* realtime processing */
-          RubberBandOptionTransientsCrisp | /* crisp transients */
+          RubberBandOptionTransientsCrisp | /* crisp transients for quick response */
           RubberBandOptionThreadingNever |  /* no threading in RT context */
           RubberBandOptionWindowShort |     /* shorter analysis window for lower latency */
           RubberBandOptionFormantShifted |  /* allow formant shifting for better responsiveness */
           RubberBandOptionSmoothingOff |    /* disable smoothing for lower latency */
-          RubberBandOptionPhaseIndependent, /* reduce phase artifacts that can cause latency */
+          RubberBandOptionPhaseIndependent | /* reduce phase artifacts that can cause latency */
+          RubberBandOptionPitchHighSpeed |  /* fast pitch processing for immediate response */
+          RubberBandOptionEngineFaster |    /* use faster engine for lower latency */
+          RubberBandOptionDetectorPercussive, /* percussive detector for quick parameter changes */
       1.0,                                  /* initial time ratio (no speed change) */
       1.0                                   /* initial pitch scale (no pitch change) */
   );
@@ -31,10 +34,13 @@ int init_rubberband(struct data *data)
     return -1;
   }
 
-  /* Set up buffer sizes - use smaller buffers for lower latency */
-  /* Use smaller buffer size for rubberband to reduce latency */
-  data->rubberband_buffer_size = 512; /* Smaller fixed buffer size for lower latency */
-  if (data->max_buffer_size > 0 && data->max_buffer_size < 512)
+  /* Set maximum process size to very small chunks for immediate responsiveness */
+  rubberband_set_max_process_size(data->rubberband_state, 256);
+
+  /* Set up buffer sizes - use very small buffers for maximum responsiveness */
+  /* Use minimal buffer size for rubberband to reduce latency to absolute minimum */
+  data->rubberband_buffer_size = 256; /* Even smaller buffer size for ultra-low latency */
+  if (data->max_buffer_size > 0 && data->max_buffer_size < 256)
   {
     data->rubberband_buffer_size = data->max_buffer_size;
   }
