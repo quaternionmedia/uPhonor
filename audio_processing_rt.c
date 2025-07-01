@@ -1,9 +1,10 @@
 #include "audio_processing_rt.h"
 #include "rt_nonrt_bridge.h"
+#include <math.h>
 
 void handle_audio_input_rt(struct data *data, uint32_t n_samples)
 {
-  /* Get input buffer */
+  /* Get input buffer first - we need to process it even if not recording */
   float *in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
 
   if (!in)
@@ -17,6 +18,7 @@ void handle_audio_input_rt(struct data *data, uint32_t n_samples)
     return;
   }
 
+  /* Always process the input buffer to prevent "out of buffers" messages */
   /* Calculate RMS occasionally for level monitoring (RT-safe) */
   static uint32_t rms_skip_counter = 0;
   if (++rms_skip_counter >= 100)
@@ -466,8 +468,15 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
     }
   }
 
-  while (remaining > 0 && total_output < n_samples)
+  /* Add a safety counter to prevent infinite loops */
+  int iteration_count = 0;
+  const int max_iterations = 10; /* Reasonable limit for RT processing */
+
+  while (remaining > 0 && total_output < n_samples && iteration_count < max_iterations)
   {
+    iteration_count++;
+    bool made_progress = false;
+
     /* Check how many samples rubberband needs */
     int required = rubberband_get_samples_required(data->rubberband_state);
 
@@ -491,6 +500,7 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
         /* Feed samples to rubberband */
         const float *input_ptr = data->rubberband_input_buffer;
         rubberband_process(data->rubberband_state, &input_ptr, (size_t)frames_read, 0);
+        made_progress = true;
       }
     }
 
@@ -518,10 +528,12 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
       }
 
       remaining = n_samples - total_output;
+      made_progress = true;
     }
-    else
+
+    /* If no progress was made in this iteration, break to avoid infinite loop */
+    if (!made_progress)
     {
-      /* No samples available, break to avoid infinite loop */
       break;
     }
   }
