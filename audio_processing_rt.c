@@ -409,9 +409,17 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
   static float last_pitch = 0.0f;
   static int param_debug_count = 0;
   bool params_changed = false;
+  bool large_change = false;
 
   if (data->playback_speed != last_speed)
   {
+    /* Check if this is a large speed change that might benefit from reset */
+    float speed_change_ratio = fabsf(data->playback_speed - last_speed) / last_speed;
+    if (speed_change_ratio > 0.5f) /* Large change > 50% */
+    {
+      large_change = true;
+    }
+
     /* Set time ratio for speed changes (inverse of playback speed) */
     double time_ratio = 1.0 / data->playback_speed;
     rubberband_set_time_ratio(data->rubberband_state, time_ratio);
@@ -419,7 +427,8 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
 
     if (param_debug_count < 3)
     {
-      pw_log_info("DEBUG: Set time ratio to %.3f (speed %.2f)", time_ratio, data->playback_speed);
+      pw_log_info("DEBUG: Set time ratio to %.3f (speed %.2f), large_change: %s",
+                  time_ratio, data->playback_speed, large_change ? "true" : "false");
       param_debug_count++;
     }
     last_speed = data->playback_speed;
@@ -427,6 +436,13 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
 
   if (data->pitch_shift != last_pitch)
   {
+    /* Check if this is a large pitch change */
+    float pitch_change = fabsf(data->pitch_shift - last_pitch);
+    if (pitch_change > 6.0f) /* Large change > 6 semitones (half octave) */
+    {
+      large_change = true;
+    }
+
     /* Set pitch scale for pitch changes, ensuring 1.0 means no pitch change */
     if (data->pitch_shift == 0.0f)
     {
@@ -449,24 +465,35 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
     last_pitch = data->pitch_shift;
   }
 
-  /* If parameters changed, reset rubberband for immediate response */
+  /* If parameters changed, apply them smoothly or reset for large changes */
   if (params_changed)
   {
-    /* Reset rubberband to flush internal buffers and apply new parameters immediately */
-    rubberband_reset(data->rubberband_state);
-    if (param_debug_count < 3)
+    if (large_change)
     {
-      pw_log_info("DEBUG: Reset rubberband for immediate parameter change response");
+      /* For large parameter changes, reset to avoid artifacts */
+      rubberband_reset(data->rubberband_state);
+      if (param_debug_count < 3)
+      {
+        pw_log_info("DEBUG: Large parameter change - resetting rubberband");
+      }
     }
-    
-    /* Feed extra samples to rubberband to get immediate output with new parameters */
-    uint32_t extra_size = 512; /* Feed more samples for quicker response */
-    if (extra_size > data->rubberband_buffer_size)
+    else
     {
-      extra_size = data->rubberband_buffer_size;
+      /* For small changes, just help with transition */
+      if (param_debug_count < 3)
+      {
+        pw_log_info("DEBUG: Small parameter change - smooth transition");
+      }
     }
 
-    sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, extra_size);
+    /* Feed a smaller amount of extra samples for transition */
+    uint32_t transition_size = large_change ? 256 : 64; /* Larger buffer for resets */
+    if (transition_size > data->rubberband_buffer_size)
+    {
+      transition_size = data->rubberband_buffer_size;
+    }
+
+    sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, transition_size);
     if (frames_read > 0)
     {
       const float *input_ptr = data->rubberband_input_buffer;

@@ -13,20 +13,20 @@ int init_rubberband(struct data *data)
 
   /* Create rubberband state for realtime processing with ultra-low latency and maximum responsiveness */
   data->rubberband_state = rubberband_new(
-      sample_rate,                          /* sample rate */
-      1,                                    /* channels (mono) */
-      RubberBandOptionProcessRealTime |     /* realtime processing */
-          RubberBandOptionTransientsCrisp | /* crisp transients for quick response */
-          RubberBandOptionThreadingNever |  /* no threading in RT context */
-          RubberBandOptionWindowShort |     /* shorter analysis window for lower latency */
-          RubberBandOptionFormantShifted |  /* allow formant shifting for better responsiveness */
-          RubberBandOptionSmoothingOff |    /* disable smoothing for lower latency */
-          RubberBandOptionPhaseIndependent | /* reduce phase artifacts that can cause latency */
-          RubberBandOptionPitchHighSpeed |  /* fast pitch processing for immediate response */
-          RubberBandOptionEngineFaster |    /* use faster engine for lower latency */
+      sample_rate,                            /* sample rate */
+      1,                                      /* channels (mono) */
+      RubberBandOptionProcessRealTime |       /* realtime processing */
+          RubberBandOptionTransientsCrisp |   /* crisp transients for quick response */
+          RubberBandOptionThreadingNever |    /* no threading in RT context */
+          RubberBandOptionWindowShort |       /* shorter analysis window for lower latency */
+          RubberBandOptionFormantShifted |    /* allow formant shifting for better responsiveness */
+          RubberBandOptionSmoothingOff |      /* disable smoothing for lower latency */
+          RubberBandOptionPhaseIndependent |  /* reduce phase artifacts that can cause latency */
+          RubberBandOptionPitchHighSpeed |    /* fast pitch processing for immediate response */
+          RubberBandOptionEngineFaster |      /* use faster engine for lower latency */
           RubberBandOptionDetectorPercussive, /* percussive detector for quick parameter changes */
-      1.0,                                  /* initial time ratio (no speed change) */
-      1.0                                   /* initial pitch scale (no pitch change) */
+      1.0,                                    /* initial time ratio (no speed change) */
+      1.0                                     /* initial pitch scale (no pitch change) */
   );
 
   if (!data->rubberband_state)
