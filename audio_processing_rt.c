@@ -2,6 +2,7 @@
 #include "rt_nonrt_bridge.h"
 #include <math.h>
 #include <string.h>
+#include <rubberband/rubberband-c.h>
 
 void handle_audio_input_rt(struct data *data, uint32_t n_samples)
 {

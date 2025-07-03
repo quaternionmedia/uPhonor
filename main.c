@@ -30,15 +30,17 @@ int main(int argc, char *argv[])
   data.sample_position = 0.0; // Initialize fractional sample position
 
   data.current_state = HOLO_STATE_IDLE;
-  
+
   // Initialize loop manager
   data.loop_mgr = malloc(sizeof(struct loop_manager));
-  if (!data.loop_mgr) {
+  if (!data.loop_mgr)
+  {
     fprintf(stderr, "Failed to allocate loop manager\n");
     return -1;
   }
-  
-  if (loop_manager_init(data.loop_mgr) < 0) {
+
+  if (loop_manager_init(data.loop_mgr) < 0)
+  {
     fprintf(stderr, "Failed to initialize loop manager\n");
     free(data.loop_mgr);
     return -1;
@@ -249,7 +251,8 @@ int main(int argc, char *argv[])
   audio_buffer_rt_cleanup(&data.audio_buffer);
 
   // Clean up loop manager
-  if (data.loop_mgr) {
+  if (data.loop_mgr)
+  {
     loop_manager_cleanup(data.loop_mgr);
     free(data.loop_mgr);
   }

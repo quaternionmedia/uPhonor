@@ -13,11 +13,14 @@ void on_process(void *userdata, struct spa_io_position *position)
   process_midi_input(data, position);
 
   // Handle audio processing based on whether we have loop manager
-  if (data->loop_mgr) {
+  if (data->loop_mgr)
+  {
     // Multi-loop processing
     handle_multiple_loops_audio_input(data, n_samples);
     process_multiple_loops_audio_output(data, position);
-  } else {
+  }
+  else
+  {
     // Fallback to single loop processing
     handle_audio_input_rt(data, n_samples);
     process_audio_output_rt(data, position);

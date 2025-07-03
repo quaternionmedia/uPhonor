@@ -89,10 +89,10 @@ struct data
 
   /* RT/Non-RT bridge for performance-critical operations */
   struct rt_nonrt_bridge rt_bridge;
-  
+
   /* RT-optimized audio buffering system */
   struct audio_buffer_rt audio_buffer;
-  
+
   /* Loop manager for handling multiple loops */
   struct loop_manager *loop_mgr;
 };

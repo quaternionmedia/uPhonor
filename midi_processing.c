@@ -99,9 +99,12 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
   float volume = (float)(velocity & 0x7f) / 127.0f;
 
   // Process the specific loop for this MIDI note
-  if (data->loop_mgr) {
+  if (data->loop_mgr)
+  {
     process_multiple_loops(data, note, volume);
-  } else {
+  }
+  else
+  {
     // Fallback to single loop behavior if loop manager not initialized
     pw_log_warn("Loop manager not initialized, using single loop behavior");
     process_loops(data, NULL, volume);
