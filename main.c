@@ -92,11 +92,11 @@ int main(int argc, char *argv[])
   data.rubberband_input_buffer = NULL;
   data.rubberband_output_buffer = NULL;
   data.rubberband_buffer_size = 0;
-  
+
   /* Set default format information for rubberband initialization */
   data.format.info.raw.rate = 48000; /* Default sample rate */
   data.format.info.raw.channels = 1; /* Mono */
-  
+
   /* Initialize rubberband now that we have format info */
   if (init_rubberband(&data) < 0)
   {

@@ -84,4 +84,7 @@ int start_loop_recording(struct loop_slot *loop, const char *filename);
 int stop_loop_recording(struct loop_slot *loop);
 int start_loop_playing(struct loop_slot *loop, const char *filename);
 
+/* Variable speed reading for individual loops (record player mode) */
+sf_count_t read_loop_with_variable_speed(struct loop_slot *loop, float *buf, uint32_t n_samples, float playback_speed);
+
 #endif /* LOOP_MANAGER_H */

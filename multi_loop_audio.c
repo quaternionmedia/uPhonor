@@ -8,7 +8,6 @@
 
 // Forward declaration for rubberband processing function
 uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n_samples);
-
 void process_multiple_loops_audio_output(struct data *data, struct spa_io_position *position)
 {
   if (!data || !data->loop_mgr || !position)
@@ -64,13 +63,24 @@ void process_multiple_loops_audio_output(struct data *data, struct spa_io_positi
       audio_buffer_rt_fill(&loop->audio_buffer, loop->file, &loop->fileinfo);
     }
 
-    /* Read audio from this loop using RT-optimized buffering */
+    /* Read audio from this loop */
     float temp_buf[n_samples];
-    sf_count_t frames_read = audio_buffer_rt_read(&loop->audio_buffer,
-                                                  loop->file,
-                                                  &loop->fileinfo,
-                                                  temp_buf,
-                                                  n_samples);
+    sf_count_t frames_read;
+
+    if (data->rubberband_enabled)
+    {
+      /* When rubberband is enabled, read normally and apply rubberband to mixed output */
+      frames_read = audio_buffer_rt_read(&loop->audio_buffer,
+                                         loop->file,
+                                         &loop->fileinfo,
+                                         temp_buf,
+                                         n_samples);
+    }
+    else
+    {
+      /* When rubberband is disabled (record player mode), apply speed directly to this loop */
+      frames_read = read_loop_with_variable_speed(loop, temp_buf, n_samples, data->playback_speed);
+    }
 
     /* Apply volume and mix into output */
     float loop_volume = loop->volume * data->loop_mgr->master_volume;
@@ -172,13 +182,12 @@ uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n
     return n_samples; /* No processing, return original sample count */
   }
 
-  /* Update rubberband parameters if they changed - but be gentle about it */
+  /* Update rubberband parameters if they changed - prioritize immediate response */
   static float last_speed = 1.0f;
   static float last_pitch = 0.0f;
-  static int stable_counter = 0;
   bool params_changed = false;
 
-  /* Only update if values have actually changed */
+  /* Check for any parameter changes and apply immediately */
   if (fabsf(data->playback_speed - last_speed) > 0.001f)
   {
     /* Set time ratio for speed changes (inverse of playback speed) */
@@ -186,7 +195,6 @@ uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n
     rubberband_set_time_ratio(data->rubberband_state, time_ratio);
     params_changed = true;
     last_speed = data->playback_speed;
-    stable_counter = 0;
   }
 
   if (fabsf(data->pitch_shift - last_pitch) > 0.01f)
@@ -203,72 +211,131 @@ uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n
     }
     params_changed = true;
     last_pitch = data->pitch_shift;
-    stable_counter = 0;
   }
 
-  /* Only reset if we have major parameter changes and the system has been unstable */
-  if (params_changed && stable_counter == 0)
+  /* Reset rubberband immediately on parameter changes for instant response */
+  if (params_changed)
   {
-    /* Use a much gentler approach - study the output for a few frames first */
-    stable_counter = 1; /* Start stability counter */
-  }
-  else if (!params_changed)
-  {
-    stable_counter++;
+    rubberband_reset(data->rubberband_state);
   }
 
-  /* Process the input through rubberband */
-  const float *input_ptr = buffer;
-  rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
+  /* Process the input through rubberband in small chunks for immediate response */
+  uint32_t total_output = 0;
+  uint32_t input_pos = 0;
 
-  /* Get available output */
-  int available = rubberband_available(data->rubberband_state);
-  
-  /* In case we don't have enough output, try to get some by processing a bit more */
-  if (available < (int)(n_samples * 0.8f) && available < (int)n_samples)
-  {
-    /* Feed a bit more silence to encourage output */
-    static float silence_chunk[64] = {0};
-    const float *silence_ptr = silence_chunk;
-    rubberband_process(data->rubberband_state, &silence_ptr, 64, 0);
-    available = rubberband_available(data->rubberband_state);
-  }
+  /* Use very small chunks for ultra-low latency */
+  const uint32_t chunk_size = 32;
 
-  if (available > 0)
+  /* Process all input in small chunks */
+  while (input_pos < n_samples)
   {
-    /* Calculate how much to retrieve, but be conservative */
-    uint32_t to_retrieve = (uint32_t)available;
-    
-    /* Don't retrieve more than we can handle */
-    if (to_retrieve > n_samples)
+    uint32_t chunk_samples = chunk_size;
+    if (input_pos + chunk_samples > n_samples)
     {
-      to_retrieve = n_samples;
-    }
-    
-    if (to_retrieve > data->rubberband_buffer_size)
-    {
-      to_retrieve = data->rubberband_buffer_size;
+      chunk_samples = n_samples - input_pos;
     }
 
-    /* Retrieve processed samples */
-    float *output_ptr = data->rubberband_output_buffer;
-    size_t retrieved = rubberband_retrieve(data->rubberband_state, &output_ptr, to_retrieve);
+    /* Feed chunk to rubberband */
+    const float *input_ptr = &buffer[input_pos];
+    rubberband_process(data->rubberband_state, &input_ptr, chunk_samples, 0);
+    input_pos += chunk_samples;
 
-    if (retrieved > 0)
+    /* Immediately try to get output after each chunk */
+    int available = rubberband_available(data->rubberband_state);
+    if (available > 0)
     {
-      /* Copy processed samples back to the original buffer */
-      memcpy(buffer, data->rubberband_output_buffer, retrieved * sizeof(float));
-      
-      /* If we got less than expected, pad with silence rather than leaving garbage */
-      if (retrieved < n_samples)
+      uint32_t to_retrieve = (uint32_t)available;
+      if (total_output + to_retrieve > n_samples)
       {
-        memset(&buffer[retrieved], 0, (n_samples - retrieved) * sizeof(float));
+        to_retrieve = n_samples - total_output;
       }
-      
-      return (uint32_t)retrieved;
+      if (to_retrieve > data->rubberband_buffer_size)
+      {
+        to_retrieve = data->rubberband_buffer_size;
+      }
+
+      /* Retrieve processed samples */
+      float *output_ptr = data->rubberband_output_buffer;
+      size_t retrieved = rubberband_retrieve(data->rubberband_state, &output_ptr, to_retrieve);
+
+      /* Copy processed samples back to the original buffer */
+      for (size_t i = 0; i < retrieved && total_output < n_samples; i++)
+      {
+        buffer[total_output++] = data->rubberband_output_buffer[i];
+      }
     }
   }
 
-  /* If we get here, rubberband didn't produce output - return original samples */
+  /* If we still don't have enough output, pad with silence */
+  for (uint32_t i = total_output; i < n_samples; i++)
+  {
+    buffer[i] = 0.0f;
+  }
+
+  return total_output;
+}
+
+/* Simplified variable speed reading for individual loops */
+sf_count_t read_loop_with_variable_speed(struct loop_slot *loop, float *buf, uint32_t n_samples, float playback_speed)
+{
+  if (!loop || !loop->file || playback_speed <= 0.0f)
+  {
+    /* Fill with silence if invalid */
+    memset(buf, 0, n_samples * sizeof(float));
+    return n_samples;
+  }
+
+  if (playback_speed == 1.0f)
+  {
+    /* Normal speed - use regular buffered reading */
+    return audio_buffer_rt_read(&loop->audio_buffer,
+                                loop->file,
+                                &loop->fileinfo,
+                                buf,
+                                n_samples);
+  }
+
+  /* For variable speed, read more or fewer samples and resample */
+  uint32_t samples_needed = (uint32_t)(n_samples / playback_speed) + 1;
+  if (samples_needed > 4096)
+    samples_needed = 4096; /* Limit buffer size */
+
+  static float temp_buffer[4096];
+  sf_count_t frames_read = audio_buffer_rt_read(&loop->audio_buffer,
+                                                loop->file,
+                                                &loop->fileinfo,
+                                                temp_buffer,
+                                                samples_needed);
+
+  if (frames_read == 0)
+  {
+    memset(buf, 0, n_samples * sizeof(float));
+    return n_samples;
+  }
+
+  /* Simple resampling using linear interpolation */
+  for (uint32_t i = 0; i < n_samples; i++)
+  {
+    float src_index = i / playback_speed;
+    uint32_t src_int = (uint32_t)src_index;
+    float src_frac = src_index - src_int;
+
+    if (src_int < frames_read - 1)
+    {
+      /* Linear interpolation */
+      buf[i] = temp_buffer[src_int] + src_frac * (temp_buffer[src_int + 1] - temp_buffer[src_int]);
+    }
+    else if (src_int < frames_read)
+    {
+      /* Use last sample */
+      buf[i] = temp_buffer[src_int];
+    }
+    else
+    {
+      /* Silence */
+      buf[i] = 0.0f;
+    }
+  }
+
   return n_samples;
 }
