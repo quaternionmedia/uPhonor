@@ -30,6 +30,21 @@ int main(int argc, char *argv[])
   data.sample_position = 0.0; // Initialize fractional sample position
 
   data.current_state = HOLO_STATE_IDLE;
+
+  // Initialize loop manager
+  data.loop_mgr = malloc(sizeof(struct loop_manager));
+  if (!data.loop_mgr)
+  {
+    fprintf(stderr, "Failed to allocate loop manager\n");
+    return -1;
+  }
+
+  if (loop_manager_init(data.loop_mgr) < 0)
+  {
+    fprintf(stderr, "Failed to initialize loop manager\n");
+    free(data.loop_mgr);
+    return -1;
+  }
   // Initialize performance buffers (add after data initialization)
   data.max_buffer_size = 2048 * 8; // Support up to 8 channels at 2048 samples
   data.silence_buffer = calloc(data.max_buffer_size, sizeof(float));
@@ -70,14 +85,25 @@ int main(int argc, char *argv[])
     return -1;
   }
 
-  /* Initialize rubberband after we have format information */
-  /* Note: We'll initialize this later when we have proper format info */
+  /* Initialize rubberband with default sample rate */
   data.rubberband_state = NULL;
   data.pitch_shift = 0.0f;
   data.rubberband_enabled = true;
   data.rubberband_input_buffer = NULL;
   data.rubberband_output_buffer = NULL;
   data.rubberband_buffer_size = 0;
+
+  /* Set default format information for rubberband initialization */
+  data.format.info.raw.rate = 48000; /* Default sample rate */
+  data.format.info.raw.channels = 1; /* Mono */
+
+  /* Initialize rubberband now that we have format info */
+  if (init_rubberband(&data) < 0)
+  {
+    fprintf(stderr, "Failed to initialize rubberband processing\n");
+    /* Continue without rubberband - not a fatal error */
+    data.rubberband_enabled = false;
+  }
   /* Set up buffer parameters for audio */
   const struct spa_pod *params[1];
   uint8_t buffer[1024];
@@ -234,6 +260,13 @@ int main(int argc, char *argv[])
 
   // Cleanup audio buffer system
   audio_buffer_rt_cleanup(&data.audio_buffer);
+
+  // Clean up loop manager
+  if (data.loop_mgr)
+  {
+    loop_manager_cleanup(data.loop_mgr);
+    free(data.loop_mgr);
+  }
 
   // Free performance buffers
   free(data.silence_buffer);

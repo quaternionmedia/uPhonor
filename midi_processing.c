@@ -98,17 +98,26 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
   // Convert MIDI velocity to volume (0.0-1.0)
   float volume = (float)(velocity & 0x7f) / 127.0f;
 
-  // Process the loop state change
-  process_loops(data, NULL, volume);
-
-  // Reset audio on any note on
-  data->reset_audio = true;
+  // Process the specific loop for this MIDI note
+  if (data->loop_mgr)
+  {
+    process_multiple_loops(data, note, volume);
+  }
+  else
+  {
+    // Fallback to single loop behavior if loop manager not initialized
+    pw_log_warn("Loop manager not initialized, using single loop behavior");
+    process_loops(data, NULL, volume);
+    data->reset_audio = true;
+  }
 }
 
 void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t velocity)
 {
-  // Currently not handling note off specifically
-  // Could be used for future functionality
+  // For multiple loops, note off could be used to stop a specific loop
+  // For now, we'll keep the same behavior but could extend this
+  pw_log_debug("Note off received for note %d (channel %d, velocity %d)", note, channel, velocity);
+  // Could implement: stop specific loop, fade out, etc.
 }
 
 void handle_control_change(struct data *data, uint8_t channel, uint8_t controller, uint8_t value)
@@ -119,20 +128,20 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
   {
     /* Convert MIDI CC value (0-127) to playback speed (0.25x to 4.0x) */
     /* CC value 64 = normal speed (1.0x)
-     * CC value 0 = quarter speed (0.25x)
-     * CC value 127 = quadruple speed (4.0x)
+     * CC value 0 = quarter speed (0.25x) - LOW VALUES = SLOW
+     * CC value 127 = quadruple speed (4.0x) - HIGH VALUES = FAST
      */
     float new_speed;
 
-    /* Map CC value to speed with center detent at 64 */
+    /* Map CC value to speed with center detent at 64 - STANDARD mapping */
     if (value < 64)
     {
-      /* Map 0-63 to 0.25-1.0 */
+      /* Map 0-63 to 0.25-1.0 (low CC = slow speed) */
       new_speed = 0.25f + ((float)value / 63.0f) * 0.75f;
     }
     else
     {
-      /* Map 64-127 to 1.0-4.0 */
+      /* Map 64-127 to 1.0-4.0 (high CC = fast speed) */
       new_speed = 1.0f + ((float)(value - 64) / 63.0f) * 3.0f;
     }
 
@@ -193,20 +202,20 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
   {
     /* Convert MIDI CC value (0-127) to record player speed/pitch factor (0.25x to 4.0x) */
     /* CC value 64 = normal speed/pitch (1.0x)
-     * CC value 0 = quarter speed/pitch (0.25x)
-     * CC value 127 = quadruple speed/pitch (4.0x)
+     * CC value 0 = quarter speed/pitch (0.25x) - LOW VALUES = SLOW
+     * CC value 127 = quadruple speed/pitch (4.0x) - HIGH VALUES = FAST
      */
     float speed_pitch_factor;
 
-    /* Map CC value to speed/pitch factor with center detent at 64 */
+    /* Map CC value to speed/pitch factor with center detent at 64 - STANDARD mapping */
     if (value < 64)
     {
-      /* Map 0-63 to 0.25-1.0 */
+      /* Map 0-63 to 0.25-1.0 (low CC = slow speed) */
       speed_pitch_factor = 0.25f + ((float)value / 63.0f) * 0.75f;
     }
     else
     {
-      /* Map 64-127 to 1.0-4.0 */
+      /* Map 64-127 to 1.0-4.0 (high CC = fast speed) */
       speed_pitch_factor = 1.0f + ((float)(value - 64) / 63.0f) * 3.0f;
     }
 

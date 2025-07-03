@@ -15,6 +15,8 @@ rubberband = dependency('rubberband')
 # sources
 uphonor_sources = [
   'uphonor.h', 
+  'common_types.h',
+  'loop_manager.h',
   'main.c',
   'audio_processing.c',
   'audio_processing_rt.c',
@@ -25,6 +27,8 @@ uphonor_sources = [
   'record.c',
   'rubberband_processing.c',
   'utils.c',
+  'loop_manager.c',
+  'multi_loop_audio.c',
 ]
 
 # exes
