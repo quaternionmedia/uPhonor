@@ -1,6 +1,6 @@
 #include "uphonor.h"
 
-static void on_param_changed(void *userdata, uint32_t id, const struct spa_pod *param)
+static void on_param_changed(void *userdata, void *object, uint32_t id, const struct spa_pod *param)
 {
   struct data *data = userdata;
 
@@ -21,4 +21,20 @@ static void on_param_changed(void *userdata, uint32_t id, const struct spa_pod *
 
   pw_log_info("  rate:%d channels:%d\n",
               data->format.info.raw.rate, data->format.info.raw.channels);
+
+  /* Initialize rubberband now that we have format information */
+  if (!data->rubberband_state && data->format.info.raw.rate > 0)
+  {
+    pw_log_info("DEBUG: Initializing rubberband with sample rate %d", data->format.info.raw.rate);
+    if (init_rubberband(data) < 0)
+    {
+      pw_log_warn("Failed to initialize rubberband");
+      pw_log_warn("DEBUG: Rubberband initialization FAILED");
+    }
+    else
+    {
+      pw_log_info("Rubberband initialized successfully");
+      pw_log_info("DEBUG: Rubberband initialized successfully, state: %p", data->rubberband_state);
+    }
+  }
 }

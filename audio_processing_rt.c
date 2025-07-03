@@ -1,9 +1,10 @@
 #include "audio_processing_rt.h"
 #include "rt_nonrt_bridge.h"
+#include <math.h>
 
 void handle_audio_input_rt(struct data *data, uint32_t n_samples)
 {
-  /* Get input buffer */
+  /* Get input buffer first - we need to process it even if not recording */
   float *in = pw_filter_get_dsp_buffer(data->audio_in, n_samples);
 
   if (!in)
@@ -17,6 +18,7 @@ void handle_audio_input_rt(struct data *data, uint32_t n_samples)
     return;
   }
 
+  /* Always process the input buffer to prevent "out of buffers" messages */
   /* Calculate RMS occasionally for level monitoring (RT-safe) */
   static uint32_t rms_skip_counter = 0;
   if (++rms_skip_counter >= 100)
@@ -89,12 +91,31 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   if (data->reset_audio)
   {
     sf_seek(data->file, 0, SEEK_SET);
-    data->sample_position = 0.0;  /* Reset fractional position for variable speed */
+    data->sample_position = 0.0; /* Reset fractional position for variable speed */
     data->reset_audio = false;
   }
 
   /* Read audio data with variable speed playback */
-  sf_count_t frames_read = read_audio_frames_variable_speed_rt(data, buf, n_samples);
+  sf_count_t frames_read;
+
+  /* Debug: Check which audio processing path is taken */
+  static bool debug_path_logged = false;
+  if (!debug_path_logged)
+  {
+    pw_log_info("DEBUG: Audio processing path - rubberband_enabled: %s, rubberband_state: %s",
+                data->rubberband_enabled ? "true" : "false",
+                data->rubberband_state ? "valid" : "NULL");
+    debug_path_logged = true;
+  }
+
+  if (data->rubberband_enabled && data->rubberband_state)
+  {
+    frames_read = read_audio_frames_rubberband_rt(data, buf, n_samples);
+  }
+  else
+  {
+    frames_read = read_audio_frames_variable_speed_rt(data, buf, n_samples);
+  }
 
   /* Apply volume (RT-optimized) */
   apply_volume_rt(buf, frames_read, data->volume);
@@ -354,4 +375,223 @@ int stop_recording_rt(struct data *data)
   }
 
   return 0;
+}
+
+uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t n_samples)
+{
+  /* Debug: One-time state check at first call */
+  static bool first_call = true;
+  if (first_call)
+  {
+    pw_log_info("DEBUG: First rubberband call - enabled: %s, state: %s",
+                data->rubberband_enabled ? "true" : "false",
+                data->rubberband_state ? "valid" : "NULL");
+    first_call = false;
+  }
+
+  if (!data->rubberband_enabled || !data->rubberband_state)
+  {
+    /* Debug: Print why we're falling back */
+    static int debug_count = 0;
+    if (debug_count < 5)
+    { /* Limit debug output to avoid spam */
+      pw_log_info("DEBUG: Rubberband fallback - enabled: %s, state: %s",
+                  data->rubberband_enabled ? "true" : "false",
+                  data->rubberband_state ? "valid" : "NULL");
+      debug_count++;
+    }
+    /* Fallback to variable speed if rubberband is disabled */
+    return read_audio_frames_variable_speed_rt(data, buf, n_samples);
+  }
+
+  /* Update rubberband parameters if playback speed changed */
+  static float last_speed = 1.0f;
+  static float last_pitch = 0.0f;
+  static int param_debug_count = 0;
+  bool params_changed = false;
+
+  if (data->playback_speed != last_speed)
+  {
+    /* Set time ratio for speed changes (inverse of playback speed) */
+    double time_ratio = 1.0 / data->playback_speed;
+    rubberband_set_time_ratio(data->rubberband_state, time_ratio);
+    params_changed = true;
+
+    if (param_debug_count < 3)
+    {
+      pw_log_info("DEBUG: Set time ratio to %.3f (speed %.2f)", time_ratio, data->playback_speed);
+      param_debug_count++;
+    }
+    last_speed = data->playback_speed;
+  }
+
+  if (data->pitch_shift != last_pitch)
+  {
+    /* Set pitch scale for pitch changes, ensuring 1.0 means no pitch change */
+    if (data->pitch_shift == 0.0f)
+    {
+      rubberband_set_pitch_scale(data->rubberband_state, 1.0);
+      if (param_debug_count < 3)
+      {
+        pw_log_info("DEBUG: Set pitch scale to 1.0 (no pitch shift)");
+      }
+    }
+    else
+    {
+      float pitch_scale = powf(2.0f, data->pitch_shift / 12.0f);
+      rubberband_set_pitch_scale(data->rubberband_state, pitch_scale);
+      if (param_debug_count < 3)
+      {
+        pw_log_info("DEBUG: Set pitch scale to %.3f (%.2f semitones)", pitch_scale, data->pitch_shift);
+      }
+    }
+    params_changed = true;
+    last_pitch = data->pitch_shift;
+  }
+
+  /* If parameters changed, use different strategies based on change type */
+  if (params_changed)
+  {
+    /* Determine what type of change occurred */
+    bool pitch_changed = (data->pitch_shift != last_pitch);
+    bool speed_changed = (data->playback_speed != last_speed);
+
+    if (param_debug_count < 3)
+    {
+      pw_log_info("DEBUG: Parameter change - pitch: %s, speed: %s", 
+                  pitch_changed ? "yes" : "no", speed_changed ? "yes" : "no");
+    }
+
+    if (pitch_changed)
+    {
+      /* Pitch changes benefit from reset for immediate response */
+      rubberband_reset(data->rubberband_state);
+      if (param_debug_count < 3)
+      {
+        pw_log_info("DEBUG: Reset rubberband for pitch change (immediate response)");
+      }
+    }
+    else if (speed_changed)
+    {
+      /* For speed-only changes, use gentle flushing to avoid speedup artifacts */
+      uint32_t flush_size = 32; /* Very small chunks to minimize artifacts */
+      if (flush_size > data->rubberband_buffer_size)
+      {
+        flush_size = data->rubberband_buffer_size;
+      }
+
+      sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, flush_size);
+      if (frames_read > 0)
+      {
+        const float *input_ptr = data->rubberband_input_buffer;
+        rubberband_process(data->rubberband_state, &input_ptr, (size_t)frames_read, 0);
+      }
+      
+      if (param_debug_count < 3)
+      {
+        pw_log_info("DEBUG: Gentle flush for speed change (avoid speedup)");
+      }
+    }
+  }
+
+  uint32_t total_output = 0;
+  uint32_t remaining = n_samples;
+
+  /* Prime the rubberband with some initial data if it's empty */
+  int available = rubberband_available(data->rubberband_state);
+  if (available == 0)
+  {
+    /* Feed some initial samples to get rubberband started */
+    uint32_t prime_size = 256; /* Small prime buffer */
+    if (prime_size > data->rubberband_buffer_size)
+    {
+      prime_size = data->rubberband_buffer_size;
+    }
+
+    sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, prime_size);
+    if (frames_read > 0)
+    {
+      const float *input_ptr = data->rubberband_input_buffer;
+      rubberband_process(data->rubberband_state, &input_ptr, (size_t)frames_read, 0);
+    }
+  }
+
+  /* Add a safety counter to prevent infinite loops */
+  int iteration_count = 0;
+  const int max_iterations = params_changed ? 25 : 15; /* Extra iterations when params changed for faster transition */
+
+  while (remaining > 0 && total_output < n_samples && iteration_count < max_iterations)
+  {
+    iteration_count++;
+    bool made_progress = false;
+
+    /* Check how many samples rubberband needs */
+    int required = rubberband_get_samples_required(data->rubberband_state);
+
+    if (required > 0)
+    {
+      /* Use smaller chunks when parameters changed for faster response */
+      uint32_t to_read = (uint32_t)required;
+      uint32_t chunk_limit = params_changed ? 64 : 128; /* Smaller chunks for parameter changes */
+      if (to_read > chunk_limit)
+      {
+        to_read = chunk_limit;
+      }
+      if (to_read > data->rubberband_buffer_size)
+      {
+        to_read = data->rubberband_buffer_size;
+      }
+
+      sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, to_read);
+
+      if (frames_read > 0)
+      {
+        /* Feed samples to rubberband */
+        const float *input_ptr = data->rubberband_input_buffer;
+        rubberband_process(data->rubberband_state, &input_ptr, (size_t)frames_read, 0);
+        made_progress = true;
+      }
+    }
+
+    /* Try to retrieve processed samples */
+    available = rubberband_available(data->rubberband_state);
+    if (available > 0)
+    {
+      uint32_t to_retrieve = (uint32_t)available;
+      if (to_retrieve > remaining)
+      {
+        to_retrieve = remaining;
+      }
+      if (to_retrieve > data->rubberband_buffer_size)
+      {
+        to_retrieve = data->rubberband_buffer_size;
+      }
+
+      float *output_ptr = data->rubberband_output_buffer;
+      size_t retrieved = rubberband_retrieve(data->rubberband_state, &output_ptr, to_retrieve);
+
+      /* Copy to output buffer */
+      for (size_t i = 0; i < retrieved && total_output < n_samples; i++)
+      {
+        buf[total_output++] = data->rubberband_output_buffer[i];
+      }
+
+      remaining = n_samples - total_output;
+      made_progress = true;
+    }
+
+    /* If no progress was made in this iteration, break to avoid infinite loop */
+    if (!made_progress)
+    {
+      break;
+    }
+  }
+
+  /* Fill remaining buffer with silence if needed */
+  for (uint32_t i = total_output; i < n_samples; i++)
+  {
+    buf[i] = 0.0f;
+  }
+
+  return total_output;
 }

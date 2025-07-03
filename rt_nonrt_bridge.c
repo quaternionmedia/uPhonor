@@ -55,14 +55,16 @@ uint32_t audio_ring_buffer_write_space(const struct audio_ring_buffer *rb)
 {
   uint32_t w = rb->write_idx;
   uint32_t r = rb->read_idx;
-  return (r - w - 1) & rb->mask;
+  uint32_t space = (r - w - 1) & (rb->size - 1);
+  return space;
 }
 
 uint32_t audio_ring_buffer_read_space(const struct audio_ring_buffer *rb)
 {
   uint32_t w = rb->write_idx;
   uint32_t r = rb->read_idx;
-  return (w - r) & rb->mask;
+  uint32_t space = (w - r) & (rb->size - 1);
+  return space;
 }
 
 uint32_t audio_ring_buffer_write(struct audio_ring_buffer *rb,
@@ -100,7 +102,7 @@ uint32_t audio_ring_buffer_write(struct audio_ring_buffer *rb,
   }
 
   /* Update write pointer atomically */
-  rb->write_idx = (w + to_write) & rb->mask;
+  rb->write_idx = (w + to_write);
 
   return to_write;
 }
@@ -140,7 +142,7 @@ uint32_t audio_ring_buffer_read(struct audio_ring_buffer *rb,
   }
 
   /* Update read pointer atomically */
-  rb->read_idx = (r + to_read) & rb->mask;
+  rb->read_idx = (r + to_read);
 
   return to_read;
 }
@@ -180,10 +182,10 @@ void message_queue_destroy(struct message_queue *mq)
 bool message_queue_push(struct message_queue *mq, const struct rt_message *msg)
 {
   uint32_t w = mq->write_idx;
-  uint32_t next_w = (w + 1) & mq->mask;
+  uint32_t next_w = w + 1;
 
   /* Check if queue is full */
-  if (next_w == mq->read_idx)
+  if ((next_w & (mq->size - 1)) == (mq->read_idx & (mq->size - 1)))
   {
     return false; /* Queue full */
   }
@@ -202,7 +204,7 @@ bool message_queue_pop(struct message_queue *mq, struct rt_message *msg)
   uint32_t r = mq->read_idx;
 
   /* Check if queue is empty */
-  if (r == mq->write_idx)
+  if ((r & (mq->size - 1)) == (mq->write_idx & (mq->size - 1)))
   {
     return false; /* Queue empty */
   }
@@ -211,7 +213,7 @@ bool message_queue_pop(struct message_queue *mq, struct rt_message *msg)
   *msg = mq->messages[r & mq->mask];
 
   /* Update read pointer */
-  mq->read_idx = (r + 1) & mq->mask;
+  mq->read_idx = r + 1;
 
   return true;
 }
@@ -234,9 +236,12 @@ void *nonrt_worker_thread(void *arg)
 
   while (worker->running)
   {
+    bool did_work = false;
+
     /* Process messages from RT thread */
     while (message_queue_pop(worker->msg_queue, &msg))
     {
+      did_work = true;
       switch (msg.type)
       {
       case RT_MSG_START_RECORDING:
@@ -314,6 +319,7 @@ void *nonrt_worker_thread(void *arg)
 
       if (available > 0)
       {
+        did_work = true;
         /* Ensure buffer is large enough */
         if (available > audio_buffer_size)
         {
@@ -352,8 +358,11 @@ void *nonrt_worker_thread(void *arg)
       }
     }
 
-    /* Small sleep to prevent busy-wait */
-    // usleep(1000); /* 1ms */
+    /* Sleep only when there's no work to do to prevent busy-wait */
+    if (!did_work)
+    {
+      usleep(1000); /* 1ms - allows thread to yield CPU when idle */
+    }
   }
 
   /* Cleanup */
