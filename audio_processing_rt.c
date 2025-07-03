@@ -1,6 +1,7 @@
 #include "audio_processing_rt.h"
 #include "rt_nonrt_bridge.h"
 #include <math.h>
+#include <string.h>
 
 void handle_audio_input_rt(struct data *data, uint32_t n_samples)
 {
@@ -21,8 +22,8 @@ void handle_audio_input_rt(struct data *data, uint32_t n_samples)
   /* Always process the input buffer to prevent "out of buffers" messages */
   /* Calculate RMS occasionally for level monitoring (RT-safe) */
   static uint32_t rms_skip_counter = 0;
-  if (++rms_skip_counter >= 100)
-  { /* Every ~2 seconds at 48kHz/1024 */
+  if (++rms_skip_counter >= 200)
+  { /* Reduced frequency - Every ~4 seconds at 48kHz/1024 for better RT performance */
     float rms = calculate_rms_rt(in, n_samples);
 
     if (rms > 0.001f)
@@ -43,13 +44,14 @@ void handle_audio_input_rt(struct data *data, uint32_t n_samples)
     {
       /* Buffer overrun - could send error message but don't block */
       static uint32_t overrun_counter = 0;
-      if (++overrun_counter >= 1000)
-      { /* Throttle error messages */
+      if (++overrun_counter >= 2000)
+      { /* Throttle error messages more aggressively for RT safety */
         struct rt_message msg = {
             .type = RT_MSG_ERROR,
         };
-        strncpy(msg.data.error.message, "Audio buffer overrun",
-                sizeof(msg.data.error.message) - 1);
+        /* Use a static error message to avoid string operations in RT thread */
+        const char *error_msg = "Audio buffer overrun";
+        memcpy(msg.data.error.message, error_msg, strlen(error_msg) + 1);
         rt_bridge_send_message(&data->rt_bridge, &msg);
         overrun_counter = 0;
       }
@@ -98,23 +100,14 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   /* Read audio data with variable speed playback */
   sf_count_t frames_read;
 
-  /* Debug: Check which audio processing path is taken */
-  static bool debug_path_logged = false;
-  if (!debug_path_logged)
-  {
-    pw_log_info("DEBUG: Audio processing path - rubberband_enabled: %s, rubberband_state: %s",
-                data->rubberband_enabled ? "true" : "false",
-                data->rubberband_state ? "valid" : "NULL");
-    debug_path_logged = true;
-  }
-
   if (data->rubberband_enabled && data->rubberband_state)
   {
     frames_read = read_audio_frames_rubberband_rt(data, buf, n_samples);
   }
   else
   {
-    frames_read = read_audio_frames_variable_speed_rt(data, buf, n_samples);
+    /* Use optimized buffered reading to minimize file I/O */
+    frames_read = read_audio_frames_variable_speed_buffered_rt(data, buf, n_samples);
   }
 
   /* Apply volume (RT-optimized) */
@@ -132,18 +125,23 @@ float calculate_rms_rt(const float *buffer, uint32_t n_samples)
   if (!buffer || n_samples == 0)
     return 0.0f;
 
-  /* Optimized RMS calculation - unroll loop for better performance */
+  /* Highly optimized RMS calculation for RT thread */
   float sum = 0.0f;
   uint32_t i;
-
-  /* Process 4 samples at a time for better cache usage */
-  for (i = 0; i < (n_samples & ~3); i += 4)
+  
+  /* Process 8 samples at a time for better SIMD potential and cache usage */
+  const uint32_t unroll_count = 8;
+  const uint32_t vectorized_samples = n_samples & ~(unroll_count - 1);
+  
+  for (i = 0; i < vectorized_samples; i += unroll_count)
   {
-    float s0 = buffer[i];
-    float s1 = buffer[i + 1];
-    float s2 = buffer[i + 2];
-    float s3 = buffer[i + 3];
-    sum += s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3;
+    float s0 = buffer[i];     float s1 = buffer[i + 1];
+    float s2 = buffer[i + 2]; float s3 = buffer[i + 3];
+    float s4 = buffer[i + 4]; float s5 = buffer[i + 5];
+    float s6 = buffer[i + 6]; float s7 = buffer[i + 7];
+    
+    sum += s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3 +
+           s4 * s4 + s5 * s5 + s6 * s6 + s7 * s7;
   }
 
   /* Handle remaining samples */
@@ -161,8 +159,23 @@ void apply_volume_rt(float *buf, uint32_t frames, float volume)
   if (volume == 1.0f)
     return; /* No change needed - avoid unnecessary operations */
 
-  /* Vectorizable loop for volume application */
-  for (uint32_t i = 0; i < frames; i++)
+  /* Highly optimized volume application for RT thread */
+  uint32_t i;
+  
+  /* Process 8 samples at a time for better SIMD potential */
+  const uint32_t unroll_count = 8;
+  const uint32_t vectorized_frames = frames & ~(unroll_count - 1);
+  
+  for (i = 0; i < vectorized_frames; i += unroll_count)
+  {
+    buf[i]     *= volume; buf[i + 1] *= volume;
+    buf[i + 2] *= volume; buf[i + 3] *= volume;
+    buf[i + 4] *= volume; buf[i + 5] *= volume;
+    buf[i + 6] *= volume; buf[i + 7] *= volume;
+  }
+  
+  /* Handle remaining samples */
+  for (; i < frames; i++)
   {
     buf[i] *= volume;
   }
@@ -338,9 +351,14 @@ int start_recording_rt(struct data *data, const char *filename)
   /* Copy filename if provided */
   if (filename)
   {
-    strncpy(msg.data.recording.filename, filename,
-            sizeof(msg.data.recording.filename) - 1);
-    msg.data.recording.filename[sizeof(msg.data.recording.filename) - 1] = '\0';
+    /* Use memcpy instead of strncpy for RT safety and ensure null termination */
+    size_t len = strlen(filename);
+    if (len >= sizeof(msg.data.recording.filename))
+    {
+      len = sizeof(msg.data.recording.filename) - 1;
+    }
+    memcpy(msg.data.recording.filename, filename, len);
+    msg.data.recording.filename[len] = '\0';
   }
   else
   {
@@ -379,27 +397,8 @@ int stop_recording_rt(struct data *data)
 
 uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t n_samples)
 {
-  /* Debug: One-time state check at first call */
-  static bool first_call = true;
-  if (first_call)
-  {
-    pw_log_info("DEBUG: First rubberband call - enabled: %s, state: %s",
-                data->rubberband_enabled ? "true" : "false",
-                data->rubberband_state ? "valid" : "NULL");
-    first_call = false;
-  }
-
   if (!data->rubberband_enabled || !data->rubberband_state)
   {
-    /* Debug: Print why we're falling back */
-    static int debug_count = 0;
-    if (debug_count < 5)
-    { /* Limit debug output to avoid spam */
-      pw_log_info("DEBUG: Rubberband fallback - enabled: %s, state: %s",
-                  data->rubberband_enabled ? "true" : "false",
-                  data->rubberband_state ? "valid" : "NULL");
-      debug_count++;
-    }
     /* Fallback to variable speed if rubberband is disabled */
     return read_audio_frames_variable_speed_rt(data, buf, n_samples);
   }
@@ -407,7 +406,6 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
   /* Update rubberband parameters if playback speed changed */
   static float last_speed = 1.0f;
   static float last_pitch = 0.0f;
-  static int param_debug_count = 0;
   bool params_changed = false;
 
   if (data->playback_speed != last_speed)
@@ -416,12 +414,6 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
     double time_ratio = 1.0 / data->playback_speed;
     rubberband_set_time_ratio(data->rubberband_state, time_ratio);
     params_changed = true;
-
-    if (param_debug_count < 3)
-    {
-      pw_log_info("DEBUG: Set time ratio to %.3f (speed %.2f)", time_ratio, data->playback_speed);
-      param_debug_count++;
-    }
     last_speed = data->playback_speed;
   }
 
@@ -431,19 +423,11 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
     if (data->pitch_shift == 0.0f)
     {
       rubberband_set_pitch_scale(data->rubberband_state, 1.0);
-      if (param_debug_count < 3)
-      {
-        pw_log_info("DEBUG: Set pitch scale to 1.0 (no pitch shift)");
-      }
     }
     else
     {
       float pitch_scale = powf(2.0f, data->pitch_shift / 12.0f);
       rubberband_set_pitch_scale(data->rubberband_state, pitch_scale);
-      if (param_debug_count < 3)
-      {
-        pw_log_info("DEBUG: Set pitch scale to %.3f (%.2f semitones)", pitch_scale, data->pitch_shift);
-      }
     }
     params_changed = true;
     last_pitch = data->pitch_shift;
@@ -456,20 +440,10 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
     bool pitch_changed = (data->pitch_shift != last_pitch);
     bool speed_changed = (data->playback_speed != last_speed);
 
-    if (param_debug_count < 3)
-    {
-      pw_log_info("DEBUG: Parameter change - pitch: %s, speed: %s", 
-                  pitch_changed ? "yes" : "no", speed_changed ? "yes" : "no");
-    }
-
     if (pitch_changed)
     {
       /* Pitch changes benefit from reset for immediate response */
       rubberband_reset(data->rubberband_state);
-      if (param_debug_count < 3)
-      {
-        pw_log_info("DEBUG: Reset rubberband for pitch change (immediate response)");
-      }
     }
     else if (speed_changed)
     {
@@ -480,16 +454,11 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
         flush_size = data->rubberband_buffer_size;
       }
 
-      sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, flush_size);
+      sf_count_t frames_read = read_audio_frames_buffered_rt(data, data->rubberband_input_buffer, flush_size);
       if (frames_read > 0)
       {
         const float *input_ptr = data->rubberband_input_buffer;
         rubberband_process(data->rubberband_state, &input_ptr, (size_t)frames_read, 0);
-      }
-      
-      if (param_debug_count < 3)
-      {
-        pw_log_info("DEBUG: Gentle flush for speed change (avoid speedup)");
       }
     }
   }
@@ -508,7 +477,7 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
       prime_size = data->rubberband_buffer_size;
     }
 
-    sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, prime_size);
+    sf_count_t frames_read = read_audio_frames_buffered_rt(data, data->rubberband_input_buffer, prime_size);
     if (frames_read > 0)
     {
       const float *input_ptr = data->rubberband_input_buffer;
@@ -542,7 +511,7 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
         to_read = data->rubberband_buffer_size;
       }
 
-      sf_count_t frames_read = read_audio_frames_rt(data, data->rubberband_input_buffer, to_read);
+      sf_count_t frames_read = read_audio_frames_buffered_rt(data, data->rubberband_input_buffer, to_read);
 
       if (frames_read > 0)
       {
@@ -594,4 +563,107 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
   }
 
   return total_output;
+}
+
+/* Optimized buffered audio reading functions - minimize file I/O in RT thread */
+
+sf_count_t read_audio_frames_buffered_rt(struct data *data, float *buf, uint32_t n_samples)
+{
+  /* Use the buffered system to minimize file I/O operations */
+  return audio_buffer_rt_read(&data->audio_buffer, data->file, &data->fileinfo, buf, n_samples);
+}
+
+sf_count_t read_audio_frames_variable_speed_buffered_rt(struct data *data, float *buf, uint32_t n_samples)
+{
+  if (data->playback_speed <= 0.0f || data->playback_speed > 10.0f)
+  {
+    /* Invalid speed, use normal speed as fallback */
+    data->playback_speed = 1.0f;
+  }
+
+  if (data->playback_speed == 1.0f)
+  {
+    /* Normal speed - use the optimized buffered path */
+    return read_audio_frames_buffered_rt(data, buf, n_samples);
+  }
+
+  /* Variable speed playback using linear interpolation with minimal file I/O */
+  sf_count_t total_frames = data->fileinfo.frames;
+  uint32_t output_frames = 0;
+  
+  /* Pre-allocate a small working buffer to reduce individual sample reads */
+  const uint32_t work_buffer_size = 256;
+  static float work_buffer[256];
+  static sf_count_t work_buffer_start = -1;
+  static uint32_t work_buffer_valid = 0;
+
+  for (uint32_t i = 0; i < n_samples && output_frames < n_samples; i++)
+  {
+    /* Get integer and fractional parts of sample position */
+    sf_count_t sample_index = (sf_count_t)data->sample_position;
+    double frac = data->sample_position - sample_index;
+
+    /* Handle looping */
+    if (sample_index >= total_frames)
+    {
+      data->sample_position = fmod(data->sample_position, total_frames);
+      sample_index = (sf_count_t)data->sample_position;
+      frac = data->sample_position - sample_index;
+      audio_buffer_rt_reset(&data->audio_buffer);
+      work_buffer_start = -1; /* Invalidate work buffer */
+    }
+
+    /* Check if we need to refresh the work buffer */
+    if (work_buffer_start == -1 || 
+        sample_index < work_buffer_start || 
+        sample_index >= (work_buffer_start + work_buffer_valid))
+    {
+      /* Refresh work buffer from the main audio buffer */
+      work_buffer_start = sample_index;
+      work_buffer_valid = audio_buffer_rt_read(&data->audio_buffer, data->file, &data->fileinfo,
+                                               work_buffer, work_buffer_size);
+    }
+
+    /* Get samples for interpolation from work buffer */
+    float current_sample = 0.0f;
+    float next_sample = 0.0f;
+    
+    sf_count_t local_index = sample_index - work_buffer_start;
+    if (local_index < work_buffer_valid)
+    {
+      current_sample = work_buffer[local_index];
+      
+      if (local_index + 1 < work_buffer_valid)
+      {
+        next_sample = work_buffer[local_index + 1];
+      }
+      else if (sample_index + 1 < total_frames)
+      {
+        /* Need next sample, but it's beyond our work buffer */
+        sf_count_t next_pos = sample_index + 1;
+        audio_buffer_rt_read(&data->audio_buffer, data->file, &data->fileinfo, &next_sample, 1);
+      }
+      else
+      {
+        /* End of file - use first sample for looping */
+        audio_buffer_rt_reset(&data->audio_buffer);
+        audio_buffer_rt_read(&data->audio_buffer, data->file, &data->fileinfo, &next_sample, 1);
+      }
+    }
+
+    /* Linear interpolation */
+    buf[output_frames] = current_sample + (next_sample - current_sample) * frac;
+    output_frames++;
+
+    /* Advance sample position by speed multiplier */
+    data->sample_position += data->playback_speed;
+  }
+
+  /* Fill remaining buffer with silence if needed */
+  for (uint32_t i = output_frames; i < n_samples; i++)
+  {
+    buf[i] = 0.0f;
+  }
+
+  return output_frames;
 }

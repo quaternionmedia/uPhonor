@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <rubberband/rubberband-c.h>
 #include "rt_nonrt_bridge.h"
+#include "audio_buffer_rt.h"
 
 struct port
 {
@@ -93,6 +94,9 @@ struct data
 
   /* RT/Non-RT bridge for performance-critical operations */
   struct rt_nonrt_bridge rt_bridge;
+  
+  /* RT-optimized audio buffering system */
+  struct audio_buffer_rt audio_buffer;
 };
 
 /* Function declarations */
@@ -102,7 +106,6 @@ void on_process(void *userdata, struct spa_io_position *position);
 #include "audio_processing.h"
 #include "midi_processing.h"
 #include "buffer_manager.h"
-#include "rt_nonrt_bridge.h"
 
 void process_loops(struct data *data, struct spa_io_position *position, float volume);
 

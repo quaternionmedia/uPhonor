@@ -18,6 +18,7 @@ uphonor_sources = [
   'main.c',
   'audio_processing.c',
   'audio_processing_rt.c',
+  'audio_buffer_rt.c',
   'rt_nonrt_bridge.c',
   'midi_processing.c', 
   'buffer_manager.c',

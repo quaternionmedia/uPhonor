@@ -3,6 +3,7 @@
 #include "pipe.c"
 #include "process.c"
 #include "audio_processing_rt.h"
+#include "audio_buffer_rt.h"
 
 struct pw_filter_events filter_events = {
     PW_VERSION_FILTER_EVENTS,
@@ -41,6 +42,16 @@ int main(int argc, char *argv[])
                            ) < 0)
   {
     fprintf(stderr, "Failed to initialize RT/Non-RT bridge\n");
+    free(data.silence_buffer);
+    free(data.temp_audio_buffer);
+    return -1;
+  }
+
+  // Initialize audio buffer system for RT-optimized file reading
+  if (audio_buffer_rt_init(&data.audio_buffer, 8) < 0) // Support up to 8 channels
+  {
+    fprintf(stderr, "Failed to initialize audio buffer system\n");
+    rt_nonrt_bridge_destroy(&data.rt_bridge);
     free(data.silence_buffer);
     free(data.temp_audio_buffer);
     return -1;
@@ -219,7 +230,10 @@ int main(int argc, char *argv[])
   }
 
   // Destroy RT/Non-RT bridge
-  rt_nonrt_bridge_cleanup(&data.rt_bridge);
+  rt_nonrt_bridge_destroy(&data.rt_bridge);
+
+  // Cleanup audio buffer system
+  audio_buffer_rt_cleanup(&data.audio_buffer);
 
   // Free performance buffers
   free(data.silence_buffer);

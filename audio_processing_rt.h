@@ -14,6 +14,10 @@ sf_count_t read_audio_frames_rt(struct data *data, float *buf, uint32_t n_sample
 sf_count_t read_audio_frames_variable_speed_rt(struct data *data, float *buf, uint32_t n_samples);
 uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t n_samples);
 
+/* Optimized buffered audio reading functions */
+sf_count_t read_audio_frames_buffered_rt(struct data *data, float *buf, uint32_t n_samples);
+sf_count_t read_audio_frames_variable_speed_buffered_rt(struct data *data, float *buf, uint32_t n_samples);
+
 /* Recording control functions (RT-safe) */
 int start_recording_rt(struct data *data, const char *filename);
 int stop_recording_rt(struct data *data);
