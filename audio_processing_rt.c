@@ -419,8 +419,8 @@ uint32_t read_audio_frames_rubberband_rt(struct data *data, float *buf, uint32_t
 
   if (data->playback_speed != last_speed)
   {
-    /* Set time ratio for speed changes (direct playback speed) */
-    double time_ratio = data->playback_speed;
+    /* Set time ratio for speed changes (inverse of playback speed) */
+    double time_ratio = 1.0 / data->playback_speed;
     rubberband_set_time_ratio(data->rubberband_state, time_ratio);
     params_changed = true;
     last_speed = data->playback_speed;

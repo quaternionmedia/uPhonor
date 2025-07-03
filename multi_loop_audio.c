@@ -215,8 +215,8 @@ uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n
 
   if (speed_changed)
   {
-    /* Set time ratio directly - higher values = faster playback */
-    double time_ratio = data->playback_speed;
+    /* Set time ratio - rubberband uses inverse ratio: lower values = faster playback */
+    double time_ratio = 1.0 / data->playback_speed;
     rubberband_set_time_ratio(data->rubberband_state, time_ratio);
     pw_log_debug("Rubberband: Set time ratio to %.2f (speed %.2fx)", time_ratio, data->playback_speed);
   }
@@ -239,23 +239,27 @@ uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n
   /* Process input and accumulate output in mini buffer */
   const float *input_ptr = buffer;
 
-  /* For slow speeds, feed extra input right away to keep the processor well-fed */
+  /* Feed input based on speed - balance input feeding for optimal rubberband processing */
   if (data->playback_speed < 0.5f)
   {
-    /* Very slow speeds need lots of input */
-    rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
+    /* Very slow speeds - feed more input as they consume more to produce less output */
     rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
     rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
   }
-  else if (data->playback_speed < 1.0f)
+  else if (data->playback_speed < 0.8f)
   {
-    /* Moderately slow speeds need extra input */
+    /* Moderately slow speeds - feed extra input */
     rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
+    rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
+  }
+  else if (data->playback_speed > 1.5f)
+  {
+    /* Fast speeds - single input feed as they produce more output per input */
     rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
   }
   else
   {
-    /* Normal or fast speeds */
+    /* Normal speeds around 1x - standard single feed */
     rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
   }
 
@@ -287,25 +291,21 @@ uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n
     }
   }
 
-  /* For any speed, try multiple iterations if we don't have enough output */
-  int max_tries = (data->playback_speed < 1.0f) ? 8 : 4; /* More tries for slow speeds */
+  /* For any speed, try multiple iterations if we don't have enough output, but be conservative */
+  int max_tries = (data->playback_speed < 0.7f) ? 6 : 4; /* More tries for very slow speeds only */
   for (int tries = 0; tries < max_tries && buffer_fill < n_samples; tries++)
   {
-    /* Always feed more input if we need more output */
+    /* Feed input conservatively to avoid overfeeding distortion */
     if (tries > 0)
     {
-      /* For slow speeds, feed multiple chunks of input to keep the processor active */
-      if (data->playback_speed < 1.0f)
+      if (data->playback_speed < 0.6f)
       {
-        /* Feed input multiple times for slow speeds - they need more input to produce output */
-        for (int feed_count = 0; feed_count < 3; feed_count++)
-        {
-          rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
-        }
+        /* For very slow speeds, feed additional input */
+        rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
       }
       else
       {
-        /* For fast speeds, feed the same input again */
+        /* For normal and fast speeds, single input feed per retry */
         rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
       }
     }
@@ -351,44 +351,79 @@ uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n
                  data->playback_speed, data->pitch_shift, buffer_fill, n_samples, available);
   }
 
-  /* Check if buffer is running low and we need to feed more input */
-  if (buffer_fill < n_samples && data->playback_speed < 1.0f)
+  /* Check if buffer is running low and we need additional processing */
+  if (buffer_fill < n_samples)
   {
-    /* Buffer is low for slow speed - feed more input to keep it flowing */
-    int extra_feeds = (int)(1.0f / data->playback_speed); /* More feeds for slower speeds */
-    if (extra_feeds > 5)
-      extra_feeds = 5; /* Limit to avoid excessive processing */
-
-    for (int feed = 0; feed < extra_feeds; feed++)
+    if (data->playback_speed < 0.6f)
     {
-      rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
+      /* Buffer is low for very slow speed - feed more input conservatively */
+      int extra_feeds = 2; /* Conservative feeding to avoid distortion */
 
-      available = rubberband_available(data->rubberband_state);
-      if (available > 0)
+      for (int feed = 0; feed < extra_feeds; feed++)
       {
-        uint32_t space_left = 256 - buffer_fill;
-        uint32_t to_retrieve = (uint32_t)available;
-        if (to_retrieve > space_left)
-          to_retrieve = space_left;
-        if (to_retrieve > data->rubberband_buffer_size)
-          to_retrieve = data->rubberband_buffer_size;
+        rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
 
-        if (to_retrieve > 0)
+        available = rubberband_available(data->rubberband_state);
+        if (available > 0)
         {
-          float *output_ptr = data->rubberband_output_buffer;
-          size_t retrieved = rubberband_retrieve(data->rubberband_state, &output_ptr, to_retrieve);
+          uint32_t space_left = 256 - buffer_fill;
+          uint32_t to_retrieve = (uint32_t)available;
+          if (to_retrieve > space_left)
+            to_retrieve = space_left;
+          if (to_retrieve > data->rubberband_buffer_size)
+            to_retrieve = data->rubberband_buffer_size;
 
-          if (retrieved > 0 && buffer_fill + retrieved <= 256)
+          if (to_retrieve > 0)
           {
-            memcpy(&mini_buffer[buffer_fill], data->rubberband_output_buffer, retrieved * sizeof(float));
-            buffer_fill += (uint32_t)retrieved;
+            float *output_ptr = data->rubberband_output_buffer;
+            size_t retrieved = rubberband_retrieve(data->rubberband_state, &output_ptr, to_retrieve);
+
+            if (retrieved > 0 && buffer_fill + retrieved <= 256)
+            {
+              memcpy(&mini_buffer[buffer_fill], data->rubberband_output_buffer, retrieved * sizeof(float));
+              buffer_fill += (uint32_t)retrieved;
+            }
           }
         }
-      }
 
-      /* Stop if we have enough now */
-      if (buffer_fill >= n_samples)
-        break;
+        /* Stop if we have enough now */
+        if (buffer_fill >= n_samples)
+          break;
+      }
+    }
+    else
+    {
+      /* For normal and fast speeds - try conservative output retrieval */
+      for (int retrieval_attempt = 0; retrieval_attempt < 2 && buffer_fill < n_samples; retrieval_attempt++)
+      {
+        available = rubberband_available(data->rubberband_state);
+        if (available > 0)
+        {
+          uint32_t space_left = 256 - buffer_fill;
+          uint32_t to_retrieve = (uint32_t)available;
+          if (to_retrieve > space_left)
+            to_retrieve = space_left;
+          if (to_retrieve > data->rubberband_buffer_size)
+            to_retrieve = data->rubberband_buffer_size;
+
+          if (to_retrieve > 0)
+          {
+            float *output_ptr = data->rubberband_output_buffer;
+            size_t retrieved = rubberband_retrieve(data->rubberband_state, &output_ptr, to_retrieve);
+
+            if (retrieved > 0 && buffer_fill + retrieved <= 256)
+            {
+              memcpy(&mini_buffer[buffer_fill], data->rubberband_output_buffer, retrieved * sizeof(float));
+              buffer_fill += (uint32_t)retrieved;
+            }
+          }
+        }
+        else
+        {
+          /* No more output available, feed a single input and try again */
+          rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
+        }
+      }
     }
   }
 
@@ -457,7 +492,7 @@ sf_count_t read_loop_with_variable_speed(struct loop_slot *loop, float *buf, uin
   }
 
   /* For variable speed, read more or fewer samples and resample */
-  uint32_t samples_needed = (uint32_t)(n_samples / playback_speed) + 1;
+  uint32_t samples_needed = (uint32_t)(n_samples * playback_speed) + 1;
   if (samples_needed > 4096)
     samples_needed = 4096; /* Limit buffer size */
 
@@ -477,7 +512,7 @@ sf_count_t read_loop_with_variable_speed(struct loop_slot *loop, float *buf, uin
   /* Simple resampling using linear interpolation */
   for (uint32_t i = 0; i < n_samples; i++)
   {
-    float src_index = i / playback_speed;
+    float src_index = i * playback_speed;
     uint32_t src_int = (uint32_t)src_index;
     float src_frac = src_index - src_int;
 
