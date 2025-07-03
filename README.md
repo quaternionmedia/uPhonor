@@ -35,6 +35,10 @@ Before building uPhonor, ensure you have the following installed:
 - [PipeWire](https://pipewire.org/)
 - [libsndfile](https://libsndfile.github.io/libsndfile/)
 
+Ubuntu / Debian / Mint users should be able to install the required packages using the following:
+```sh
+sudo apt-get install -y build-essential meson libsndfile-dev libasound2-dev libdbus-1-dev libgtk2.0-dev librubberband-dev
+```
 
 ### Setup
 ```sh
