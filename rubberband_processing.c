@@ -11,19 +11,18 @@ int init_rubberband(struct data *data)
   /* Get sample rate from format info */
   uint32_t sample_rate = data->format.info.raw.rate > 0 ? data->format.info.raw.rate : 48000;
 
-  /* Create rubberband state for realtime processing with balanced quality and latency */
+  /* Create rubberband state optimized for real-time processing with good quality */
   data->rubberband_state = rubberband_new(
       sample_rate,                           /* sample rate */
       1,                                     /* channels (mono) */
       RubberBandOptionProcessRealTime |      /* realtime processing */
           RubberBandOptionTransientsMixed |  /* balanced transient handling */
           RubberBandOptionThreadingNever |   /* no threading in RT context */
-          RubberBandOptionWindowStandard |   /* standard analysis window for better quality */
-          RubberBandOptionFormantPreserved | /* preserve formants for natural sound */
-          RubberBandOptionSmoothingOn |      /* enable smoothing for better quality */
+          RubberBandOptionWindowStandard |   /* standard analysis window */
+          RubberBandOptionSmoothingOn |      /* enable smoothing for artifact reduction */
           RubberBandOptionPhaseIndependent | /* reduce phase artifacts */
-          RubberBandOptionPitchHighQuality | /* high quality pitch processing */
-          RubberBandOptionDetectorCompound,  /* compound detector for better quality */
+          RubberBandOptionPitchHighSpeed |   /* optimize for speed changes */
+          RubberBandOptionDetectorSoft,      /* softer detection for smoother results */
       1.0,                                   /* initial time ratio (no speed change) */
       1.0                                    /* initial pitch scale (no pitch change) */
   );
@@ -33,11 +32,11 @@ int init_rubberband(struct data *data)
     return -1;
   }
 
-  /* Set maximum process size for good balance between latency and quality */
-  rubberband_set_max_process_size(data->rubberband_state, 1024);
+  /* Set maximum process size for balanced performance */
+  rubberband_set_max_process_size(data->rubberband_state, 256);
 
-  /* Set up buffer sizes - larger buffers for better quality since we bypass at 1x */
-  data->rubberband_buffer_size = 2048; /* Larger buffer for better quality */
+  /* Set up buffer sizes - conservative size for stable operation */
+  data->rubberband_buffer_size = 512; /* Conservative buffer for all speeds */
   if (data->max_buffer_size > 0 && data->max_buffer_size < 2048)
   {
     data->rubberband_buffer_size = data->max_buffer_size;
