@@ -94,9 +94,22 @@ struct data
 
   /* RT/Non-RT bridge for performance-critical operations */
   struct rt_nonrt_bridge rt_bridge;
-  
+
   /* RT-optimized audio buffering system */
   struct audio_buffer_rt audio_buffer;
+
+  /* In-memory loop recording and playback */
+  struct memory_loop
+  {
+    float *buffer;              /* In-memory audio buffer for recorded loop */
+    uint32_t buffer_size;       /* Total allocated size of buffer */
+    uint32_t recorded_frames;   /* Number of frames currently recorded */
+    uint32_t playback_position; /* Current playback position in the loop */
+    bool loop_ready;            /* Whether loop is ready for playback */
+    bool recording_to_memory;   /* Whether we're currently recording to memory */
+    uint32_t sample_rate;       /* Sample rate for the recorded loop */
+    char loop_filename[512];    /* Filename for eventual file write */
+  } memory_loop;
 };
 
 /* Function declarations */

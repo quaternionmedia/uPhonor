@@ -57,6 +57,17 @@ int main(int argc, char *argv[])
     return -1;
   }
 
+  // Initialize memory loop system (60 seconds max loop at 48kHz)
+  if (init_memory_loop(&data, 60, 48000) < 0)
+  {
+    fprintf(stderr, "Failed to initialize memory loop system\n");
+    audio_buffer_rt_cleanup(&data.audio_buffer);
+    rt_nonrt_bridge_destroy(&data.rt_bridge);
+    free(data.silence_buffer);
+    free(data.temp_audio_buffer);
+    return -1;
+  }
+
   // Create recordings directory if it doesn't exist
   struct stat st = {0};
   if (stat("recordings", &st) == -1)
@@ -234,6 +245,9 @@ int main(int argc, char *argv[])
 
   // Cleanup audio buffer system
   audio_buffer_rt_cleanup(&data.audio_buffer);
+
+  // Cleanup memory loop system
+  cleanup_memory_loop(&data);
 
   // Free performance buffers
   free(data.silence_buffer);

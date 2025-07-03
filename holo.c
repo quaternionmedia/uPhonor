@@ -1,8 +1,10 @@
 #include "uphonor.h"
 #include "rt_nonrt_bridge.h"
+#include "audio_processing_rt.h"
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
 
 // This function processes the loops based on the current state
 void process_loops(struct data *data, struct spa_io_position *position, float volume)
@@ -20,54 +22,44 @@ void process_loops(struct data *data, struct spa_io_position *position, float vo
   switch (data->current_state)
   {
   case HOLO_STATE_IDLE:
-    pw_log_info("Starting recording");
-    start_recording(data, NULL);
+    pw_log_info("Starting memory loop recording");
+    /* Generate timestamp-based filename for the loop */
+    {
+      time_t now;
+      time(&now);
+      struct tm *tm_info = localtime(&now);
+      char loop_filename[256];
+      snprintf(loop_filename, sizeof(loop_filename),
+               "loop_%04d-%02d-%02d_%02d-%02d-%02d.wav",
+               tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday,
+               tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
+
+      start_loop_recording_rt(data, loop_filename);
+    }
     data->current_state = HOLO_STATE_RECORDING;
     break;
-  case HOLO_STATE_RECORDING:
-    pw_log_info("Stopping recording");
-    stop_recording(data);
 
-    /* Give the RT bridge a moment to finish processing */
-    // usleep(1000); // 1ms
+  case HOLO_STATE_RECORDING:
+    pw_log_info("Stopping memory loop recording");
+    stop_loop_recording_rt(data);
+
+    /* Give the system a moment to process the stop command */
+    usleep(1000); // 1ms
 
     data->current_state = HOLO_STATE_PLAYING;
-    if (!data->file)
-    {
-      pw_log_info("No audio file preloaded. Loading recorded file.");
-
-      /* Get the actual filename that was used for recording */
-      const char *recorded_filename = rt_bridge_get_current_filename(&data->rt_bridge);
-      pw_log_info("RT bridge reports filename: %s", recorded_filename ? recorded_filename : "NULL");
-
-      if (recorded_filename)
-      {
-        /* Update our record_filename pointer to the recorded file */
-        if (data->record_filename)
-        {
-          free(data->record_filename);
-        }
-        data->record_filename = strdup(recorded_filename);
-        pw_log_info("Starting playback of: %s", data->record_filename);
-        start_playing(data, data->record_filename);
-      }
-      else
-      {
-        pw_log_error("No recorded file found to play back");
-        data->current_state = HOLO_STATE_IDLE;
-      }
-    }
+    pw_log_info("Starting playback from memory loop");
     break;
+
   case HOLO_STATE_PLAYING:
     pw_log_info("Stopping playback");
     data->current_state = HOLO_STATE_STOPPED;
     break;
+
   case HOLO_STATE_STOPPED:
     pw_log_info("Restarting playback");
     data->current_state = HOLO_STATE_PLAYING;
-    // Reset playback position
-    data->offset = 0;
-    data->position = 0;
+    /* Reset memory loop playback position */
+    reset_memory_loop_playback_rt(data);
     break;
 
   default:

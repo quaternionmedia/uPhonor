@@ -25,7 +25,8 @@ enum rt_message_type
   RT_MSG_STOP_RECORDING,
   RT_MSG_AUDIO_LEVEL,
   RT_MSG_ERROR,
-  RT_MSG_QUIT
+  RT_MSG_QUIT,
+  RT_MSG_WRITE_LOOP_TO_FILE /* Write completed memory loop to file */
 };
 
 /* Message structure for RT -> Non-RT communication */
@@ -48,6 +49,13 @@ struct rt_message
     {
       char message[256];
     } error;
+    struct
+    {
+      char filename[256];
+      float *audio_data;   /* Pointer to memory loop buffer */
+      uint32_t num_frames; /* Number of frames to write */
+      uint32_t sample_rate;
+    } loop_write;
   } data;
 };
 
