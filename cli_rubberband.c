@@ -89,6 +89,22 @@ int parse_rubberband_args(int argc, char **argv, struct data *data)
       set_rubberband_enabled(data, false);
       printf("Disabled rubberband processing (old-style speed/pitch coupling)\n");
     }
+    else if (strcmp(argv[i], "--volume") == 0)
+    {
+      if (i + 1 >= argc)
+      {
+        fprintf(stderr, "Error: --volume requires a value\n");
+        return -1;
+      }
+      float volume = atof(argv[++i]);
+      if (volume < 0.0f || volume > 1.0f)
+      {
+        fprintf(stderr, "Error: volume must be between 0.0 and 1.0\n");
+        return -1;
+      }
+      set_volume(data, volume);
+      printf("Set volume to %.2f\n", volume);
+    }
     else if (strcmp(argv[i], "--help") == 0)
     {
       print_usage(argv[0]);
@@ -119,7 +135,6 @@ int cli(int argc, char **argv, struct data *data)
   {
     printf("uPhonor - Enhanced with Rubberband time-stretching and pitch-shifting\n");
     printf("No audio file specified. Starting in idle mode.\n");
-    printf("Use --help for usage information.\n");
     return 0;
   }
 
@@ -145,6 +160,7 @@ int cli(int argc, char **argv, struct data *data)
       printf("Rubberband processing enabled\n");
       printf("  Pitch shift: %.2f semitones\n", data->pitch_shift);
       printf("  Playback speed: %.2f\n", data->playback_speed);
+      printf("  Volume: %.2f\n", data->volume);
     }
     else
     {
