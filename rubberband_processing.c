@@ -11,17 +11,17 @@ int init_rubberband(struct data *data)
   /* Get sample rate from format info */
   uint32_t sample_rate = data->format.info.raw.rate > 0 ? data->format.info.raw.rate : 48000;
 
-  /* Create rubberband state optimized for real-time processing with good quality */
+  /* Create rubberband state optimized for real-time processing with minimal distortion */
   data->rubberband_state = rubberband_new(
       sample_rate,                           /* sample rate */
       1,                                     /* channels (mono) */
       RubberBandOptionProcessRealTime |      /* realtime processing */
-          RubberBandOptionTransientsMixed |  /* balanced transient handling */
+          RubberBandOptionTransientsSmooth | /* smoother transient handling to reduce artifacts */
           RubberBandOptionThreadingNever |   /* no threading in RT context */
-          RubberBandOptionWindowStandard |   /* standard analysis window */
+          RubberBandOptionWindowLong |       /* longer analysis window for better quality */
           RubberBandOptionSmoothingOn |      /* enable smoothing for artifact reduction */
           RubberBandOptionPhaseIndependent | /* reduce phase artifacts */
-          RubberBandOptionPitchHighSpeed |   /* optimize for speed changes */
+          RubberBandOptionPitchHighQuality | /* higher quality pitch processing */
           RubberBandOptionDetectorSoft,      /* softer detection for smoother results */
       1.0,                                   /* initial time ratio (no speed change) */
       1.0                                    /* initial pitch scale (no pitch change) */
@@ -32,8 +32,8 @@ int init_rubberband(struct data *data)
     return -1;
   }
 
-  /* Set maximum process size for balanced performance */
-  rubberband_set_max_process_size(data->rubberband_state, 256);
+  /* Set maximum process size for better quality */
+  rubberband_set_max_process_size(data->rubberband_state, 512);
 
   /* Set up buffer sizes - conservative size for stable operation */
   data->rubberband_buffer_size = 512; /* Conservative buffer for all speeds */
