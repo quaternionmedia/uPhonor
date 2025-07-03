@@ -128,21 +128,21 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
   {
     /* Convert MIDI CC value (0-127) to playback speed (0.25x to 4.0x) */
     /* CC value 64 = normal speed (1.0x)
-     * CC value 0 = quarter speed (0.25x)
-     * CC value 127 = quadruple speed (4.0x)
+     * CC value 0 = quadruple speed (4.0x) - LOW VALUES = FAST
+     * CC value 127 = quarter speed (0.25x) - HIGH VALUES = SLOW
      */
     float new_speed;
 
-    /* Map CC value to speed with center detent at 64 */
+    /* Map CC value to speed with center detent at 64 - INVERTED for intuitive control */
     if (value < 64)
     {
-      /* Map 0-63 to 0.25-1.0 */
-      new_speed = 0.25f + ((float)value / 63.0f) * 0.75f;
+      /* Map 0-63 to 4.0-1.0 (inverted: low CC = fast speed) */
+      new_speed = 4.0f - ((float)value / 63.0f) * 3.0f;
     }
     else
     {
-      /* Map 64-127 to 1.0-4.0 */
-      new_speed = 1.0f + ((float)(value - 64) / 63.0f) * 3.0f;
+      /* Map 64-127 to 1.0-0.25 (inverted: high CC = slow speed) */
+      new_speed = 1.0f - ((float)(value - 64) / 63.0f) * 0.75f;
     }
 
     /* Use the proper speed setting function that handles rubberband */
@@ -202,21 +202,21 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
   {
     /* Convert MIDI CC value (0-127) to record player speed/pitch factor (0.25x to 4.0x) */
     /* CC value 64 = normal speed/pitch (1.0x)
-     * CC value 0 = quarter speed/pitch (0.25x)
-     * CC value 127 = quadruple speed/pitch (4.0x)
+     * CC value 0 = quadruple speed/pitch (4.0x) - LOW VALUES = FAST
+     * CC value 127 = quarter speed/pitch (0.25x) - HIGH VALUES = SLOW
      */
     float speed_pitch_factor;
 
-    /* Map CC value to speed/pitch factor with center detent at 64 */
+    /* Map CC value to speed/pitch factor with center detent at 64 - INVERTED for intuitive control */
     if (value < 64)
     {
-      /* Map 0-63 to 0.25-1.0 */
-      speed_pitch_factor = 0.25f + ((float)value / 63.0f) * 0.75f;
+      /* Map 0-63 to 4.0-1.0 (inverted: low CC = fast speed) */
+      speed_pitch_factor = 4.0f - ((float)value / 63.0f) * 3.0f;
     }
     else
     {
-      /* Map 64-127 to 1.0-4.0 */
-      speed_pitch_factor = 1.0f + ((float)(value - 64) / 63.0f) * 3.0f;
+      /* Map 64-127 to 1.0-0.25 (inverted: high CC = slow speed) */
+      speed_pitch_factor = 1.0f - ((float)(value - 64) / 63.0f) * 0.75f;
     }
 
     /* Set record player mode (disables rubberband, links speed and pitch) */

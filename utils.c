@@ -35,7 +35,7 @@ void set_playback_speed(struct data *data, float new_speed)
   /* Update rubberband time ratio if enabled */
   if (data->rubberband_enabled && data->rubberband_state)
   {
-    rubberband_set_time_ratio(data->rubberband_state, 1.0 / new_speed);
+    rubberband_set_time_ratio(data->rubberband_state, new_speed);
   }
 
   pw_log_info("Playback speed set to %.2fx", new_speed);

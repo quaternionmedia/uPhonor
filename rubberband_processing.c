@@ -142,8 +142,8 @@ void set_rubberband_enabled(struct data *data, bool enabled)
   {
     rubberband_reset(data->rubberband_state);
 
-    /* Set time ratio for speed changes (inverse of playback speed) */
-    rubberband_set_time_ratio(data->rubberband_state, 1.0 / data->playback_speed);
+    /* Set time ratio for speed changes (direct playback speed) */
+    rubberband_set_time_ratio(data->rubberband_state, data->playback_speed);
 
     /* Set pitch scale for pitch shifts (separate from speed) */
     float pitch_scale = powf(2.0f, data->pitch_shift / 12.0f);
