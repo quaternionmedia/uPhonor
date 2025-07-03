@@ -56,8 +56,15 @@ int init_rubberband(struct data *data)
   }
 
   /* Initialize default values */
-  data->pitch_shift = 0.0f; /* No pitch shift initially */
+  /* Note: Do NOT reset pitch_shift here - it should be preserved from CLI settings */
   /* Note: Do NOT reset rubberband_enabled here - it should be preserved from CLI settings */
+
+  /* Apply any previously set pitch shift from CLI */
+  if (data->pitch_shift != 0.0f)
+  {
+    float pitch_scale = powf(2.0f, data->pitch_shift / 12.0f);
+    rubberband_set_pitch_scale(data->rubberband_state, pitch_scale);
+  }
 
   return 0;
 }
