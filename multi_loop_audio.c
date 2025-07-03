@@ -172,21 +172,24 @@ uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n
     return n_samples; /* No processing, return original sample count */
   }
 
-  /* Update rubberband parameters if they changed */
+  /* Update rubberband parameters if they changed - but be gentle about it */
   static float last_speed = 1.0f;
   static float last_pitch = 0.0f;
+  static int stable_counter = 0;
   bool params_changed = false;
 
-  if (data->playback_speed != last_speed)
+  /* Only update if values have actually changed */
+  if (fabsf(data->playback_speed - last_speed) > 0.001f)
   {
     /* Set time ratio for speed changes (inverse of playback speed) */
     double time_ratio = 1.0 / data->playback_speed;
     rubberband_set_time_ratio(data->rubberband_state, time_ratio);
     params_changed = true;
     last_speed = data->playback_speed;
+    stable_counter = 0;
   }
 
-  if (data->pitch_shift != last_pitch)
+  if (fabsf(data->pitch_shift - last_pitch) > 0.01f)
   {
     /* Set pitch scale for pitch changes */
     if (data->pitch_shift == 0.0f)
@@ -200,24 +203,43 @@ uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n
     }
     params_changed = true;
     last_pitch = data->pitch_shift;
+    stable_counter = 0;
   }
 
-  /* If parameters changed significantly, reset rubberband for immediate response */
-  if (params_changed)
+  /* Only reset if we have major parameter changes and the system has been unstable */
+  if (params_changed && stable_counter == 0)
   {
-    rubberband_reset(data->rubberband_state);
+    /* Use a much gentler approach - study the output for a few frames first */
+    stable_counter = 1; /* Start stability counter */
+  }
+  else if (!params_changed)
+  {
+    stable_counter++;
   }
 
-  /* Process the buffer through rubberband */
+  /* Process the input through rubberband */
   const float *input_ptr = buffer;
   rubberband_process(data->rubberband_state, &input_ptr, n_samples, 0);
 
-  /* Get the processed output */
+  /* Get available output */
   int available = rubberband_available(data->rubberband_state);
+  
+  /* In case we don't have enough output, try to get some by processing a bit more */
+  if (available < (int)(n_samples * 0.8f) && available < (int)n_samples)
+  {
+    /* Feed a bit more silence to encourage output */
+    static float silence_chunk[64] = {0};
+    const float *silence_ptr = silence_chunk;
+    rubberband_process(data->rubberband_state, &silence_ptr, 64, 0);
+    available = rubberband_available(data->rubberband_state);
+  }
+
   if (available > 0)
   {
-    /* Limit output to buffer size and what's available */
+    /* Calculate how much to retrieve, but be conservative */
     uint32_t to_retrieve = (uint32_t)available;
+    
+    /* Don't retrieve more than we can handle */
     if (to_retrieve > n_samples)
     {
       to_retrieve = n_samples;
@@ -228,28 +250,25 @@ uint32_t apply_rubberband_to_buffer(struct data *data, float *buffer, uint32_t n
       to_retrieve = data->rubberband_buffer_size;
     }
 
-    /* Retrieve processed samples into the rubberband output buffer */
+    /* Retrieve processed samples */
     float *output_ptr = data->rubberband_output_buffer;
     size_t retrieved = rubberband_retrieve(data->rubberband_state, &output_ptr, to_retrieve);
 
-    /* Copy processed samples back to the original buffer */
-    for (size_t i = 0; i < retrieved; i++)
+    if (retrieved > 0)
     {
-      buffer[i] = data->rubberband_output_buffer[i];
+      /* Copy processed samples back to the original buffer */
+      memcpy(buffer, data->rubberband_output_buffer, retrieved * sizeof(float));
+      
+      /* If we got less than expected, pad with silence rather than leaving garbage */
+      if (retrieved < n_samples)
+      {
+        memset(&buffer[retrieved], 0, (n_samples - retrieved) * sizeof(float));
+      }
+      
+      return (uint32_t)retrieved;
     }
-
-    /* Clear any remaining samples in the buffer */
-    for (uint32_t i = (uint32_t)retrieved; i < n_samples; i++)
-    {
-      buffer[i] = 0.0f;
-    }
-
-    return (uint32_t)retrieved;
   }
-  else
-  {
-    /* No output available, clear the buffer */
-    memset(buffer, 0, n_samples * sizeof(float));
-    return 0;
-  }
+
+  /* If we get here, rubberband didn't produce output - return original samples */
+  return n_samples;
 }

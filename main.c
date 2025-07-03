@@ -85,14 +85,25 @@ int main(int argc, char *argv[])
     return -1;
   }
 
-  /* Initialize rubberband after we have format information */
-  /* Note: We'll initialize this later when we have proper format info */
+  /* Initialize rubberband with default sample rate */
   data.rubberband_state = NULL;
   data.pitch_shift = 0.0f;
   data.rubberband_enabled = true;
   data.rubberband_input_buffer = NULL;
   data.rubberband_output_buffer = NULL;
   data.rubberband_buffer_size = 0;
+  
+  /* Set default format information for rubberband initialization */
+  data.format.info.raw.rate = 48000; /* Default sample rate */
+  data.format.info.raw.channels = 1; /* Mono */
+  
+  /* Initialize rubberband now that we have format info */
+  if (init_rubberband(&data) < 0)
+  {
+    fprintf(stderr, "Failed to initialize rubberband processing\n");
+    /* Continue without rubberband - not a fatal error */
+    data.rubberband_enabled = false;
+  }
   /* Set up buffer parameters for audio */
   const struct spa_pod *params[1];
   uint8_t buffer[1024];

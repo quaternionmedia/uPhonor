@@ -129,18 +129,22 @@ float calculate_rms_rt(const float *buffer, uint32_t n_samples)
   /* Highly optimized RMS calculation for RT thread */
   float sum = 0.0f;
   uint32_t i;
-  
+
   /* Process 8 samples at a time for better SIMD potential and cache usage */
   const uint32_t unroll_count = 8;
   const uint32_t vectorized_samples = n_samples & ~(unroll_count - 1);
-  
+
   for (i = 0; i < vectorized_samples; i += unroll_count)
   {
-    float s0 = buffer[i];     float s1 = buffer[i + 1];
-    float s2 = buffer[i + 2]; float s3 = buffer[i + 3];
-    float s4 = buffer[i + 4]; float s5 = buffer[i + 5];
-    float s6 = buffer[i + 6]; float s7 = buffer[i + 7];
-    
+    float s0 = buffer[i];
+    float s1 = buffer[i + 1];
+    float s2 = buffer[i + 2];
+    float s3 = buffer[i + 3];
+    float s4 = buffer[i + 4];
+    float s5 = buffer[i + 5];
+    float s6 = buffer[i + 6];
+    float s7 = buffer[i + 7];
+
     sum += s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3 +
            s4 * s4 + s5 * s5 + s6 * s6 + s7 * s7;
   }
@@ -162,19 +166,23 @@ void apply_volume_rt(float *buf, uint32_t frames, float volume)
 
   /* Highly optimized volume application for RT thread */
   uint32_t i;
-  
+
   /* Process 8 samples at a time for better SIMD potential */
   const uint32_t unroll_count = 8;
   const uint32_t vectorized_frames = frames & ~(unroll_count - 1);
-  
+
   for (i = 0; i < vectorized_frames; i += unroll_count)
   {
-    buf[i]     *= volume; buf[i + 1] *= volume;
-    buf[i + 2] *= volume; buf[i + 3] *= volume;
-    buf[i + 4] *= volume; buf[i + 5] *= volume;
-    buf[i + 6] *= volume; buf[i + 7] *= volume;
+    buf[i] *= volume;
+    buf[i + 1] *= volume;
+    buf[i + 2] *= volume;
+    buf[i + 3] *= volume;
+    buf[i + 4] *= volume;
+    buf[i + 5] *= volume;
+    buf[i + 6] *= volume;
+    buf[i + 7] *= volume;
   }
-  
+
   /* Handle remaining samples */
   for (; i < frames; i++)
   {
@@ -591,7 +599,7 @@ sf_count_t read_audio_frames_variable_speed_buffered_rt(struct data *data, float
   /* Variable speed playback using linear interpolation with minimal file I/O */
   sf_count_t total_frames = data->fileinfo.frames;
   uint32_t output_frames = 0;
-  
+
   /* Pre-allocate a small working buffer to reduce individual sample reads */
   const uint32_t work_buffer_size = 256;
   static float work_buffer[256];
@@ -615,8 +623,8 @@ sf_count_t read_audio_frames_variable_speed_buffered_rt(struct data *data, float
     }
 
     /* Check if we need to refresh the work buffer */
-    if (work_buffer_start == -1 || 
-        sample_index < work_buffer_start || 
+    if (work_buffer_start == -1 ||
+        sample_index < work_buffer_start ||
         sample_index >= (work_buffer_start + work_buffer_valid))
     {
       /* Refresh work buffer from the main audio buffer */
@@ -628,12 +636,12 @@ sf_count_t read_audio_frames_variable_speed_buffered_rt(struct data *data, float
     /* Get samples for interpolation from work buffer */
     float current_sample = 0.0f;
     float next_sample = 0.0f;
-    
+
     sf_count_t local_index = sample_index - work_buffer_start;
     if (local_index < work_buffer_valid)
     {
       current_sample = work_buffer[local_index];
-      
+
       if (local_index + 1 < work_buffer_valid)
       {
         next_sample = work_buffer[local_index + 1];
