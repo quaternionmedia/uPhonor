@@ -1,6 +1,7 @@
 #ifndef UPHONOR_H
 #define UPHONOR_H
 
+#include "common_types.h"
 #include <errno.h>
 #include <math.h>
 #include <signal.h>
@@ -67,13 +68,7 @@ struct data
   char *record_filename;
 
   /* Holophonor loop states */
-  enum holo_state
-  {
-    HOLO_STATE_IDLE,
-    HOLO_STATE_RECORDING,
-    HOLO_STATE_PLAYING,
-    HOLO_STATE_STOPPED
-  } current_state;
+  enum holo_state current_state;
 
   /* Flag to reset audio playback on loop sync */
   bool reset_audio;
@@ -97,6 +92,9 @@ struct data
   
   /* RT-optimized audio buffering system */
   struct audio_buffer_rt audio_buffer;
+  
+  /* Loop manager for handling multiple loops */
+  struct loop_manager *loop_mgr;
 };
 
 /* Function declarations */
@@ -106,6 +104,7 @@ void on_process(void *userdata, struct spa_io_position *position);
 #include "audio_processing.h"
 #include "midi_processing.h"
 #include "buffer_manager.h"
+#include "loop_manager.h"
 
 void process_loops(struct data *data, struct spa_io_position *position, float volume);
 
