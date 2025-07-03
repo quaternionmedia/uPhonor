@@ -22,17 +22,14 @@ sf_count_t read_audio_frames_variable_speed_buffered_rt(struct data *data, float
 int start_recording_rt(struct data *data, const char *filename);
 int stop_recording_rt(struct data *data);
 
-/* In-memory loop recording functions (RT-safe) */
-int start_loop_recording_rt(struct data *data, const char *filename);
-int stop_loop_recording_rt(struct data *data);
-sf_count_t read_audio_frames_from_memory_loop_rt(struct data *data, float *buf, uint32_t n_samples);
-sf_count_t read_audio_frames_from_memory_loop_variable_speed_rt(struct data *data, float *buf, uint32_t n_samples);
-uint32_t read_audio_frames_memory_loop_rubberband_rt(struct data *data, float *buf, uint32_t n_samples);
-bool store_audio_in_memory_loop_rt(struct data *data, const float *input, uint32_t n_samples);
+/* In-memory loop recording functions (RT-safe) - Multi-loop support */
+int start_loop_recording_rt(struct data *data, uint8_t midi_note, const char *filename);
+int stop_loop_recording_rt(struct data *data, uint8_t midi_note);
+bool store_audio_in_memory_loop_rt(struct data *data, uint8_t midi_note, const float *input, uint32_t n_samples);
 
-/* Memory loop management */
-int init_memory_loop(struct data *data, uint32_t max_seconds, uint32_t sample_rate);
-void cleanup_memory_loop(struct data *data);
-void reset_memory_loop_playback_rt(struct data *data);
+/* Multi-loop mixing functions */
+sf_count_t mix_all_active_loops_rt(struct data *data, float *buf, uint32_t n_samples);
+sf_count_t read_audio_frames_from_memory_loop_basic_rt(struct memory_loop *loop, float *buf, uint32_t n_samples);
+void reset_memory_loop_playback_rt(struct data *data, uint8_t midi_note);
 
 #endif /* AUDIO_PROCESSING_RT_H */

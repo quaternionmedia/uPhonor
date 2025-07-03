@@ -66,14 +66,14 @@ struct data
   bool recording_enabled;
   char *record_filename;
 
-  /* Holophonor loop states */
-  enum holo_state
-  {
+  /* Global file playback state (separate from per-loop states) */
+  enum holo_state {
     HOLO_STATE_IDLE,
-    HOLO_STATE_RECORDING,
     HOLO_STATE_PLAYING,
     HOLO_STATE_STOPPED
   } current_state;
+
+  /* Holophonor system state - removed individual loop states, now per-loop */
 
   /* Flag to reset audio playback on loop sync */
   bool reset_audio;
@@ -98,7 +98,7 @@ struct data
   /* RT-optimized audio buffering system */
   struct audio_buffer_rt audio_buffer;
 
-  /* In-memory loop recording and playback */
+  /* In-memory loop recording and playback - one loop per MIDI note */
   struct memory_loop
   {
     float *buffer;              /* In-memory audio buffer for recorded loop */
@@ -107,9 +107,25 @@ struct data
     uint32_t playback_position; /* Current playback position in the loop */
     bool loop_ready;            /* Whether loop is ready for playback */
     bool recording_to_memory;   /* Whether we're currently recording to memory */
+    bool is_playing;            /* Whether this loop is currently playing */
     uint32_t sample_rate;       /* Sample rate for the recorded loop */
     char loop_filename[512];    /* Filename for eventual file write */
-  } memory_loop;
+    uint8_t midi_note;          /* MIDI note number (0-127) that controls this loop */
+    float volume;               /* Individual volume for this loop (from note velocity) */
+    
+    /* Per-loop state management */
+    enum loop_state
+    {
+      LOOP_STATE_IDLE,
+      LOOP_STATE_RECORDING,
+      LOOP_STATE_PLAYING,
+      LOOP_STATE_STOPPED
+    } current_state;
+  } memory_loops[128];          /* One loop for each MIDI note (0-127) */
+  
+  /* Global loop management */
+  uint8_t active_loop_count;    /* Number of loops that have been used */
+  uint8_t currently_recording_note; /* MIDI note currently being recorded (-1 if none) */
 };
 
 /* Function declarations */
@@ -120,7 +136,7 @@ void on_process(void *userdata, struct spa_io_position *position);
 #include "midi_processing.h"
 #include "buffer_manager.h"
 
-void process_loops(struct data *data, struct spa_io_position *position, float volume);
+void process_loops(struct data *data, struct spa_io_position *position, uint8_t midi_note, float volume);
 
 /* Utility functions */
 void set_volume(struct data *data, float new_volume);
@@ -129,6 +145,13 @@ void set_record_player_mode(struct data *data, float speed_pitch_factor);
 void set_pitch_shift(struct data *data, float semitones);
 void set_rubberband_enabled(struct data *data, bool enabled);
 float linear_to_db_volume(float linear_volume);
+
+/* Multi-loop management functions */
+int init_all_memory_loops(struct data *data, uint32_t max_seconds, uint32_t sample_rate);
+void cleanup_all_memory_loops(struct data *data);
+struct memory_loop *get_loop_by_note(struct data *data, uint8_t midi_note);
+void stop_all_recordings(struct data *data);
+void stop_all_playback(struct data *data);
 
 /* Rubberband functions */
 int init_rubberband(struct data *data);

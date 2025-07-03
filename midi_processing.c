@@ -1,5 +1,4 @@
 #include "midi_processing.h"
-#include "holo.c"
 
 #define PERIOD_NSEC (SPA_NSEC_PER_SEC / 8)
 #define SPEED_CC_NUMBER 74         /* MIDI CC 74 for playback speed control */
@@ -98,8 +97,10 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
   // Convert MIDI velocity to volume (0.0-1.0)
   float volume = (float)(velocity & 0x7f) / 127.0f;
 
-  // Process the loop state change
-  process_loops(data, NULL, volume);
+  pw_log_info("Note On: channel=%d, note=%d, velocity=%d, volume=%.2f", channel, note, velocity, volume);
+
+  // Process the loop state change for the specific MIDI note
+  process_loops(data, NULL, note, volume);
 
   // Reset audio on any note on
   data->reset_audio = true;
@@ -107,8 +108,15 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
 
 void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t velocity)
 {
-  // Currently not handling note off specifically
-  // Could be used for future functionality
+  pw_log_info("Note Off: channel=%d, note=%d, velocity=%d", channel, note, velocity);
+  
+  // For note off, we could implement loop stop functionality
+  struct memory_loop *loop = get_loop_by_note(data, note);
+  if (loop && (loop->current_state == LOOP_STATE_PLAYING)) {
+    pw_log_info("Stopping playback for note %d", note);
+    loop->current_state = LOOP_STATE_STOPPED;
+    loop->is_playing = false;
+  }
 }
 
 void handle_control_change(struct data *data, uint8_t channel, uint8_t controller, uint8_t value)

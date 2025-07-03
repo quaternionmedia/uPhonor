@@ -60,22 +60,26 @@ void handle_audio_input_rt(struct data *data, uint32_t n_samples)
     }
   }
 
-  /* Store audio in memory loop if loop recording is active (RT-safe) */
-  if (data->memory_loop.recording_to_memory)
+  /* Store audio in memory loop if any loop recording is active (RT-safe) */
+  if (data->currently_recording_note < 128)
   {
-    if (!store_audio_in_memory_loop_rt(data, in, n_samples))
+    struct memory_loop *loop = &data->memory_loops[data->currently_recording_note];
+    if (loop->recording_to_memory)
     {
-      /* Memory loop buffer is full - could send notification but don't block */
-      static uint32_t loop_full_counter = 0;
-      if (++loop_full_counter >= 2000)
-      { /* Throttle error messages */
-        struct rt_message msg = {
-            .type = RT_MSG_ERROR,
-        };
-        const char *error_msg = "Memory loop buffer full";
-        memcpy(msg.data.error.message, error_msg, strlen(error_msg) + 1);
-        rt_bridge_send_message(&data->rt_bridge, &msg);
-        loop_full_counter = 0;
+      if (!store_audio_in_memory_loop_rt(data, data->currently_recording_note, in, n_samples))
+      {
+        /* Memory loop buffer is full - could send notification but don't block */
+        static uint32_t loop_full_counter = 0;
+        if (++loop_full_counter >= 2000)
+        { /* Throttle error messages */
+          struct rt_message msg = {
+              .type = RT_MSG_ERROR,
+          };
+          const char *error_msg = "Memory loop buffer full";
+          memcpy(msg.data.error.message, error_msg, strlen(error_msg) + 1);
+          rt_bridge_send_message(&data->rt_bridge, &msg);
+          loop_full_counter = 0;
+        }
       }
     }
   }
@@ -86,9 +90,18 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   struct pw_buffer *b;
   uint32_t n_samples = position->clock.duration;
 
-  if (data->current_state != HOLO_STATE_PLAYING)
+  /* Check if any loops are ready for playback */
+  bool any_loops_playing = false;
+  for (int i = 0; i < 128; i++) {
+    if (data->memory_loops[i].is_playing && data->memory_loops[i].loop_ready) {
+      any_loops_playing = true;
+      break;
+    }
+  }
+
+  if (!any_loops_playing)
   {
-    return; /* Skip processing if not in playing state */
+    return; /* Skip processing if no loops are playing */
   }
 
   /* Get output buffer */
@@ -114,68 +127,23 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   /* Handle audio reset (RT-safe file operations) */
   if (data->reset_audio)
   {
-    if (data->memory_loop.loop_ready)
-    {
-      /* Reset memory loop playback position */
-      reset_memory_loop_playback_rt(data);
+    /* Reset all active memory loops */
+    for (int i = 0; i < 128; i++) {
+      if (data->memory_loops[i].loop_ready) {
+        reset_memory_loop_playback_rt(data, i);
+      }
     }
-    else
-    {
-      /* Reset file playback position */
-      sf_seek(data->file, 0, SEEK_SET);
-      data->sample_position = 0.0; /* Reset fractional position for variable speed */
-    }
+    
+    /* Reset file playback position */
+    sf_seek(data->file, 0, SEEK_SET);
+    data->sample_position = 0.0; /* Reset fractional position for variable speed */
     data->reset_audio = false;
   }
 
-  /* Read audio data with variable speed playback */
-  sf_count_t frames_read;
+  /* Mix all active memory loops */
+  sf_count_t frames_read = mix_all_active_loops_rt(data, buf, n_samples);
 
-  /* Check if we should play from memory loop instead of file */
-  if (data->memory_loop.loop_ready && data->memory_loop.recorded_frames > 0)
-  {
-    /* Play from memory loop */
-
-    /* If rubberband is enabled but not initialized, try to initialize it */
-    if (data->rubberband_enabled && !data->rubberband_state)
-    {
-      pw_log_info("DEBUG: Rubberband enabled but not initialized, attempting to initialize");
-      if (init_rubberband(data) < 0)
-      {
-        pw_log_warn("DEBUG: Failed to initialize rubberband in memory loop path");
-      }
-    }
-
-    if (data->rubberband_enabled && data->rubberband_state)
-    {
-      /* Use rubberband processing for memory loop */
-      pw_log_debug("Using memory loop with rubberband: speed=%.2f, pitch=%.2f",
-                   data->playback_speed, data->pitch_shift);
-      frames_read = read_audio_frames_memory_loop_rubberband_rt(data, buf, n_samples);
-    }
-    else
-    {
-      /* Use memory loop with variable speed support */
-      pw_log_debug("Using memory loop without rubberband: enabled=%d, state=%p",
-                   data->rubberband_enabled, data->rubberband_state);
-      frames_read = read_audio_frames_from_memory_loop_variable_speed_rt(data, buf, n_samples);
-    }
-  }
-  else
-  {
-    /* Play from file as usual */
-    if (data->rubberband_enabled && data->rubberband_state)
-    {
-      frames_read = read_audio_frames_rubberband_rt(data, buf, n_samples);
-    }
-    else
-    {
-      /* Use optimized buffered reading to minimize file I/O */
-      frames_read = read_audio_frames_variable_speed_buffered_rt(data, buf, n_samples);
-    }
-  }
-
-  /* Apply volume (RT-optimized) */
+  /* Apply global volume (RT-optimized) */
   apply_volume_rt(buf, frames_read, data->volume);
 
   b->buffer->datas[0].chunk->offset = 0;
@@ -741,85 +709,40 @@ sf_count_t read_audio_frames_variable_speed_buffered_rt(struct data *data, float
   return output_frames;
 }
 
-/* Memory loop management functions */
-
-int init_memory_loop(struct data *data, uint32_t max_seconds, uint32_t sample_rate)
+void reset_memory_loop_playback_rt(struct data *data, uint8_t midi_note)
 {
-  if (!data)
+  if (!data || midi_note >= 128)
+    return;
+
+  data->memory_loops[midi_note].playback_position = 0;
+}
+
+int start_loop_recording_rt(struct data *data, uint8_t midi_note, const char *filename)
+{
+  if (!data || midi_note >= 128)
     return -1;
 
-  /* Calculate buffer size for the given duration */
-  uint32_t buffer_size = max_seconds * sample_rate;
-
-  /* Allocate memory for the loop buffer */
-  data->memory_loop.buffer = malloc(buffer_size * sizeof(float));
-  if (!data->memory_loop.buffer)
-  {
-    return -1; /* Allocation failed */
-  }
-
-  /* Initialize loop structure */
-  data->memory_loop.buffer_size = buffer_size;
-  data->memory_loop.recorded_frames = 0;
-  data->memory_loop.playback_position = 0;
-  data->memory_loop.loop_ready = false;
-  data->memory_loop.recording_to_memory = false;
-  data->memory_loop.sample_rate = sample_rate;
-  data->memory_loop.loop_filename[0] = '\0';
-
-  /* Clear the buffer */
-  memset(data->memory_loop.buffer, 0, buffer_size * sizeof(float));
-
-  return 0;
-}
-
-void cleanup_memory_loop(struct data *data)
-{
-  if (!data)
-    return;
-
-  if (data->memory_loop.buffer)
-  {
-    free(data->memory_loop.buffer);
-    data->memory_loop.buffer = NULL;
-  }
-
-  data->memory_loop.buffer_size = 0;
-  data->memory_loop.recorded_frames = 0;
-  data->memory_loop.playback_position = 0;
-  data->memory_loop.loop_ready = false;
-  data->memory_loop.recording_to_memory = false;
-}
-
-void reset_memory_loop_playback_rt(struct data *data)
-{
-  if (!data)
-    return;
-
-  data->memory_loop.playback_position = 0;
-}
-
-int start_loop_recording_rt(struct data *data, const char *filename)
-{
-  if (!data || !data->memory_loop.buffer)
+  struct memory_loop *loop = &data->memory_loops[midi_note];
+  
+  if (!loop->buffer)
     return -1;
 
   /* Reset loop state */
-  data->memory_loop.recorded_frames = 0;
-  data->memory_loop.playback_position = 0;
-  data->memory_loop.loop_ready = false;
-  data->memory_loop.recording_to_memory = true;
+  loop->recorded_frames = 0;
+  loop->playback_position = 0;
+  loop->loop_ready = false;
+  loop->recording_to_memory = true;
 
   /* Store filename for later file write */
   if (filename)
   {
     size_t len = strlen(filename);
-    if (len >= sizeof(data->memory_loop.loop_filename))
+    if (len >= sizeof(loop->loop_filename))
     {
-      len = sizeof(data->memory_loop.loop_filename) - 1;
+      len = sizeof(loop->loop_filename) - 1;
     }
-    memcpy(data->memory_loop.loop_filename, filename, len);
-    data->memory_loop.loop_filename[len] = '\0';
+    memcpy(loop->loop_filename, filename, len);
+    loop->loop_filename[len] = '\0';
   }
   else
   {
@@ -827,42 +750,47 @@ int start_loop_recording_rt(struct data *data, const char *filename)
     time_t now;
     time(&now);
     struct tm *tm_info = localtime(&now);
-    snprintf(data->memory_loop.loop_filename, sizeof(data->memory_loop.loop_filename),
-             "loop_%04d-%02d-%02d_%02d-%02d-%02d.wav",
+    snprintf(loop->loop_filename, sizeof(loop->loop_filename),
+             "loop_note%d_%04d-%02d-%02d_%02d-%02d-%02d.wav", midi_note,
              tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday,
              tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
   }
 
   /* Also start regular recording for backup */
-  start_recording_rt(data, data->memory_loop.loop_filename);
+  start_recording_rt(data, loop->loop_filename);
 
   return 0;
 }
 
-int stop_loop_recording_rt(struct data *data)
+int stop_loop_recording_rt(struct data *data, uint8_t midi_note)
 {
-  if (!data || !data->memory_loop.recording_to_memory)
+  if (!data || midi_note >= 128)
+    return -1;
+    
+  struct memory_loop *loop = &data->memory_loops[midi_note];
+  
+  if (!loop->recording_to_memory)
     return -1;
 
   /* Stop memory recording */
-  data->memory_loop.recording_to_memory = false;
+  loop->recording_to_memory = false;
 
   /* If we recorded something, mark loop as ready for playback */
-  if (data->memory_loop.recorded_frames > 0)
+  if (loop->recorded_frames > 0)
   {
-    data->memory_loop.loop_ready = true;
-    data->memory_loop.playback_position = 0;
+    loop->loop_ready = true;
+    loop->playback_position = 0;
 
     /* Send message to non-RT thread to write loop to file */
     struct rt_message msg = {
         .type = RT_MSG_WRITE_LOOP_TO_FILE,
         .data.loop_write = {
-            .audio_data = data->memory_loop.buffer,
-            .num_frames = data->memory_loop.recorded_frames,
-            .sample_rate = data->memory_loop.sample_rate}};
+            .audio_data = loop->buffer,
+            .num_frames = loop->recorded_frames,
+            .sample_rate = loop->sample_rate}};
 
     /* Copy filename */
-    memcpy(msg.data.loop_write.filename, data->memory_loop.loop_filename,
+    memcpy(msg.data.loop_write.filename, loop->loop_filename,
            sizeof(msg.data.loop_write.filename));
 
     rt_bridge_send_message(&data->rt_bridge, &msg);
@@ -874,13 +802,18 @@ int stop_loop_recording_rt(struct data *data)
   return 0;
 }
 
-bool store_audio_in_memory_loop_rt(struct data *data, const float *input, uint32_t n_samples)
+bool store_audio_in_memory_loop_rt(struct data *data, uint8_t midi_note, const float *input, uint32_t n_samples)
 {
-  if (!data || !data->memory_loop.buffer || !data->memory_loop.recording_to_memory || !input)
+  if (midi_note >= 128 || !data || !input)
+    return false;
+
+  struct memory_loop *loop = &data->memory_loops[midi_note];
+  
+  if (!loop->buffer || !loop->recording_to_memory)
     return false;
 
   /* Check if we have space in the buffer */
-  uint32_t space_available = data->memory_loop.buffer_size - data->memory_loop.recorded_frames;
+  uint32_t space_available = loop->buffer_size - loop->recorded_frames;
   uint32_t samples_to_store = n_samples;
 
   if (samples_to_store > space_available)
@@ -889,10 +822,10 @@ bool store_audio_in_memory_loop_rt(struct data *data, const float *input, uint32
   }
 
   /* Copy audio data to memory buffer */
-  float *dest = data->memory_loop.buffer + data->memory_loop.recorded_frames;
+  float *dest = loop->buffer + loop->recorded_frames;
   memcpy(dest, input, samples_to_store * sizeof(float));
 
-  data->memory_loop.recorded_frames += samples_to_store;
+  loop->recorded_frames += samples_to_store;
 
   /* Return true if we stored all samples, false if buffer is full */
   return (samples_to_store == n_samples);
@@ -900,10 +833,11 @@ bool store_audio_in_memory_loop_rt(struct data *data, const float *input, uint32
 
 sf_count_t read_audio_frames_from_memory_loop_rt(struct data *data, float *buf, uint32_t n_samples)
 {
-  if (!data || !data->memory_loop.buffer || !data->memory_loop.loop_ready || !buf)
+  // TEMPORARY: Use first loop - this function needs proper multi-loop implementation
+  if (!data || !data->memory_loops[0].buffer || !data->memory_loops[0].loop_ready || !buf)
     return 0;
 
-  if (data->memory_loop.recorded_frames == 0)
+  if (data->memory_loops[0].recorded_frames == 0)
     return 0;
 
   uint32_t frames_copied = 0;
@@ -911,14 +845,14 @@ sf_count_t read_audio_frames_from_memory_loop_rt(struct data *data, float *buf, 
   for (uint32_t i = 0; i < n_samples; i++)
   {
     /* Handle looping */
-    if (data->memory_loop.playback_position >= data->memory_loop.recorded_frames)
+    if (data->memory_loops[0].playback_position >= data->memory_loops[0].recorded_frames)
     {
-      data->memory_loop.playback_position = 0;
+      data->memory_loops[0].playback_position = 0;
     }
 
     /* Copy sample from memory loop */
-    buf[i] = data->memory_loop.buffer[data->memory_loop.playback_position];
-    data->memory_loop.playback_position++;
+    buf[i] = data->memory_loops[0].buffer[data->memory_loops[0].playback_position];
+    data->memory_loops[0].playback_position++;
     frames_copied++;
   }
 
@@ -927,10 +861,11 @@ sf_count_t read_audio_frames_from_memory_loop_rt(struct data *data, float *buf, 
 
 sf_count_t read_audio_frames_from_memory_loop_variable_speed_rt(struct data *data, float *buf, uint32_t n_samples)
 {
-  if (!data || !data->memory_loop.buffer || !data->memory_loop.loop_ready || !buf)
+  // TEMPORARY: Use first loop - this function needs proper multi-loop implementation  
+  if (!data || !data->memory_loops[0].buffer || !data->memory_loops[0].loop_ready || !buf)
     return 0;
 
-  if (data->memory_loop.recorded_frames == 0)
+  if (data->memory_loops[0].recorded_frames == 0)
     return 0;
 
   if (data->playback_speed <= 0.0f || data->playback_speed > 10.0f)
@@ -945,7 +880,7 @@ sf_count_t read_audio_frames_from_memory_loop_variable_speed_rt(struct data *dat
   }
 
   /* Variable speed playback using linear interpolation on memory loop */
-  uint32_t total_frames = data->memory_loop.recorded_frames;
+  uint32_t total_frames = data->memory_loops[0].recorded_frames;
   uint32_t output_frames = 0;
   static double loop_sample_position = 0.0; /* Separate position for memory loop */
 
@@ -964,17 +899,17 @@ sf_count_t read_audio_frames_from_memory_loop_variable_speed_rt(struct data *dat
     }
 
     /* Get samples for interpolation */
-    float current_sample = data->memory_loop.buffer[sample_index];
+    float current_sample = data->memory_loops[0].buffer[sample_index];
     float next_sample;
 
     if (sample_index + 1 < total_frames)
     {
-      next_sample = data->memory_loop.buffer[sample_index + 1];
+      next_sample = data->memory_loops[0].buffer[sample_index + 1];
     }
     else
     {
       /* End of loop - use first sample for seamless looping */
-      next_sample = data->memory_loop.buffer[0];
+      next_sample = data->memory_loops[0].buffer[0];
     }
 
     /* Linear interpolation */
@@ -1006,7 +941,7 @@ uint32_t read_audio_frames_memory_loop_rubberband_rt(struct data *data, float *b
     return read_audio_frames_from_memory_loop_variable_speed_rt(data, buf, n_samples);
   }
 
-  if (!data->memory_loop.loop_ready || data->memory_loop.recorded_frames == 0)
+  if (!data->memory_loops[0].loop_ready || data->memory_loops[0].recorded_frames == 0)
   {
     /* No loop available, fill with silence */
     for (uint32_t i = 0; i < n_samples; i++)
