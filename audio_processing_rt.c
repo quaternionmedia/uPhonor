@@ -1053,30 +1053,21 @@ uint32_t read_audio_frames_memory_loop_rubberband_rt(struct data *data, float *b
     last_pitch = data->pitch_shift;
   }
 
-  /* If parameters changed, use different strategies based on change type */
+  /* If parameters changed, use gentle flushing to avoid timing artifacts */
   if (params_changed)
   {
-
-    if (pitch_changed)
+    /* Use gentle flushing for both speed and pitch changes to avoid speedup artifacts */
+    uint32_t flush_size = 32; /* Very small chunks to minimize artifacts */
+    if (flush_size > data->rubberband_buffer_size)
     {
-      /* Pitch changes benefit from reset for immediate response */
-      rubberband_reset(data->rubberband_state);
+      flush_size = data->rubberband_buffer_size;
     }
-    else if (speed_changed)
-    {
-      /* For speed-only changes, use gentle flushing to avoid speedup artifacts */
-      uint32_t flush_size = 32; /* Very small chunks to minimize artifacts */
-      if (flush_size > data->rubberband_buffer_size)
-      {
-        flush_size = data->rubberband_buffer_size;
-      }
 
-      sf_count_t frames_read = read_audio_frames_from_memory_loop_rt(data, data->rubberband_input_buffer, flush_size);
-      if (frames_read > 0)
-      {
-        const float *input_ptr = data->rubberband_input_buffer;
-        rubberband_process(data->rubberband_state, &input_ptr, (size_t)frames_read, 0);
-      }
+    sf_count_t frames_read = read_audio_frames_from_memory_loop_rt(data, data->rubberband_input_buffer, flush_size);
+    if (frames_read > 0)
+    {
+      const float *input_ptr = data->rubberband_input_buffer;
+      rubberband_process(data->rubberband_state, &input_ptr, (size_t)frames_read, 0);
     }
   }
 
