@@ -57,6 +57,12 @@ int init_all_memory_loops(struct data *data, uint32_t max_seconds, uint32_t samp
   data->currently_recording_note = 255;               // 255 = no note recording
   data->current_playback_mode = PLAYBACK_MODE_NORMAL; // Default to normal mode
 
+  // Initialize sync mode fields
+  data->pulse_loop_note = 255;        // No pulse loop set
+  data->pulse_loop_duration = 0;
+  data->waiting_for_pulse_reset = false;
+  data->longest_loop_duration = 0;
+
   for (int i = 0; i < 128; i++)
   {
     struct memory_loop *loop = &data->memory_loops[i];
@@ -229,11 +235,22 @@ void set_playback_mode_trigger(struct data *data)
   pw_log_info("Playback mode set to TRIGGER (Note On starts, Note Off stops)");
 }
 
+void set_playback_mode_sync(struct data *data)
+{
+  data->current_playback_mode = PLAYBACK_MODE_SYNC;
+  init_sync_mode(data);
+  pw_log_info("Playback mode set to SYNC (Synchronized recording and playback with pulse loop)");
+}
+
 void toggle_playback_mode(struct data *data)
 {
   if (data->current_playback_mode == PLAYBACK_MODE_NORMAL)
   {
     set_playback_mode_trigger(data);
+  }
+  else if (data->current_playback_mode == PLAYBACK_MODE_TRIGGER)
+  {
+    set_playback_mode_sync(data);
   }
   else
   {
@@ -249,7 +266,109 @@ const char *get_playback_mode_name(struct data *data)
     return "NORMAL";
   case PLAYBACK_MODE_TRIGGER:
     return "TRIGGER";
+  case PLAYBACK_MODE_SYNC:
+    return "SYNC";
   default:
     return "UNKNOWN";
   }
+}
+
+/* Sync mode functions */
+void init_sync_mode(struct data *data)
+{
+  data->pulse_loop_note = 255; // No pulse loop set
+  data->pulse_loop_duration = 0;
+  data->waiting_for_pulse_reset = false;
+  data->longest_loop_duration = 0;
+  pw_log_info("Sync mode initialized - waiting for first loop to set pulse");
+}
+
+bool can_start_recording_sync(struct data *data, uint8_t midi_note)
+{
+  // If no pulse loop is set, this will become the pulse loop
+  if (data->pulse_loop_note == 255)
+  {
+    return true;
+  }
+  
+  // If this is the pulse loop, check if we're waiting for its reset
+  if (midi_note == data->pulse_loop_note)
+  {
+    return !data->waiting_for_pulse_reset;
+  }
+  
+  // For other loops, only allow recording when pulse loop resets
+  return !data->waiting_for_pulse_reset;
+}
+
+void set_pulse_loop(struct data *data, uint8_t midi_note)
+{
+  if (data->pulse_loop_note == 255)
+  {
+    data->pulse_loop_note = midi_note;
+    pw_log_info("SYNC mode: Note %d set as pulse loop", midi_note);
+  }
+}
+
+void check_sync_playback_reset(struct data *data)
+{
+  if (data->current_playback_mode != PLAYBACK_MODE_SYNC)
+    return;
+    
+  // Find the longest currently playing loop
+  uint32_t longest_duration = 0;
+  bool any_playing = false;
+  
+  for (int i = 0; i < 128; i++)
+  {
+    struct memory_loop *loop = &data->memory_loops[i];
+    if (loop->is_playing && loop->recorded_frames > 0)
+    {
+      any_playing = true;
+      if (loop->recorded_frames > longest_duration)
+      {
+        longest_duration = loop->recorded_frames;
+      }
+    }
+  }
+  
+  if (!any_playing)
+    return;
+    
+  // Check if any loop has reached the end of the longest loop
+  for (int i = 0; i < 128; i++)
+  {
+    struct memory_loop *loop = &data->memory_loops[i];
+    if (loop->is_playing && loop->playback_position >= longest_duration)
+    {
+      // Reset all playing loops to the beginning
+      for (int j = 0; j < 128; j++)
+      {
+        struct memory_loop *reset_loop = &data->memory_loops[j];
+        if (reset_loop->is_playing)
+        {
+          reset_loop->playback_position = 0;
+        }
+      }
+      
+      // Allow new recordings to start
+      data->waiting_for_pulse_reset = false;
+      pw_log_info("SYNC mode: All loops reset to beginning, new recordings allowed");
+      break;
+    }
+  }
+}
+
+uint32_t get_longest_loop_duration(struct data *data)
+{
+  uint32_t longest = 0;
+  for (int i = 0; i < 128; i++)
+  {
+    struct memory_loop *loop = &data->memory_loops[i];
+    if (loop->recorded_frames > longest)
+    {
+      longest = loop->recorded_frames;
+    }
+  }
+  return longest;
 }
