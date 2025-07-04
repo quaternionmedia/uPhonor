@@ -110,6 +110,7 @@ struct data
     bool recording_to_memory;   /* Whether we're currently recording to memory */
     bool is_playing;            /* Whether this loop is currently playing */
     bool pending_record;        /* Whether this loop is waiting to start recording in sync mode */
+    bool pending_stop;          /* Whether this loop is waiting to stop recording at next pulse reset in sync mode */
     uint32_t sample_rate;       /* Sample rate for the recorded loop */
     char loop_filename[512];    /* Filename for eventual file write */
     uint8_t midi_note;          /* MIDI note number (0-127) that controls this loop */
@@ -182,6 +183,7 @@ void toggle_sync_mode(struct data *data);
 bool is_sync_mode_enabled(struct data *data);
 void check_sync_pending_recordings(struct data *data);
 void start_sync_pending_recordings_on_pulse_reset(struct data *data);
+void stop_sync_pending_recordings_on_pulse_reset(struct data *data);
 
 /* Rubberband functions */
 int init_rubberband(struct data *data);

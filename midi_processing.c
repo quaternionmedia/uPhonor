@@ -210,6 +210,15 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
   }
   else if (loop->current_state == LOOP_STATE_RECORDING)
   {
+    // Handle sync mode differently - don't stop immediately
+    if (is_sync_mode_enabled(data))
+    {
+      // In sync mode, mark for stopping at next pulse reset instead of stopping immediately
+      loop->pending_stop = true;
+      pw_log_info("SYNC mode: Marking recording for note %d to stop at next pulse reset", note);
+      return; // Don't stop immediately
+    }
+
     pw_log_info("TRIGGER mode: Stopping recording for note %d", note);
     stop_loop_recording_rt(data, note);
 
@@ -220,7 +229,7 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
     loop->is_playing = false;
     data->currently_recording_note = 255; // No longer recording
 
-    // Handle sync mode logic if enabled
+    // Handle sync mode logic if enabled (this case is for non-sync mode)
     if (is_sync_mode_enabled(data))
     {
       // Update pulse loop duration if this is the pulse loop

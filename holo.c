@@ -75,6 +75,7 @@ int init_all_memory_loops(struct data *data, uint32_t max_seconds, uint32_t samp
     loop->sample_rate = sample_rate;
     loop->volume = 1.0f;          // Default volume
     loop->pending_record = false; // Not waiting to record
+    loop->pending_stop = false;   // Not waiting to stop recording
 
     // Allocate buffer (60 seconds worth of audio)
     loop->buffer_size = max_seconds * sample_rate; // frames (mono)
@@ -217,6 +218,27 @@ void process_loops(struct data *data, struct spa_io_position *position, uint8_t 
     break;
 
   case LOOP_STATE_RECORDING:
+    // In sync mode, don't stop recording immediately - mark as pending stop
+    if (data->sync_mode_enabled && data->pulse_loop_note != 255)
+    {
+      // Special case: if this is the pulse loop itself, allow it to stop normally
+      // to establish the pulse duration
+      if (midi_note != data->pulse_loop_note)
+      {
+        if (!loop->pending_stop)
+        {
+          loop->pending_stop = true;
+          pw_log_info("SYNC mode: Marking recording for note %d to stop at next pulse reset", midi_note);
+        }
+        else
+        {
+          pw_log_info("SYNC mode: Note %d already marked to stop at next pulse reset", midi_note);
+        }
+        return; // Don't stop immediately for non-pulse loops
+      }
+      // Fall through for pulse loop to stop normally and set duration
+    }
+
     pw_log_info("Stopping memory loop recording for note %d", midi_note);
     stop_loop_recording_rt(data, midi_note);
 
@@ -328,6 +350,11 @@ void disable_sync_mode(struct data *data)
       loop->pending_record = false;
       pw_log_info("Clearing pending recording for note %d due to sync mode disable", i);
     }
+    if (loop->pending_stop)
+    {
+      loop->pending_stop = false;
+      pw_log_info("Clearing pending stop for note %d due to sync mode disable", i);
+    }
   }
 
   pw_log_info("Sync mode DISABLED - all loops now independent");
@@ -431,7 +458,10 @@ void check_sync_playback_reset(struct data *data)
       data->waiting_for_pulse_reset = false;
       pw_log_info("SYNC mode: All loops reset to beginning, new recordings allowed");
 
-      // Start any pending recordings
+      // Handle pending stops first (recordings that should end at pulse boundary)
+      stop_sync_pending_recordings_on_pulse_reset(data);
+
+      // Then start any pending recordings
       start_sync_pending_recordings_on_pulse_reset(data);
       break;
     }
@@ -538,6 +568,61 @@ void start_sync_pending_recordings_on_pulse_reset(struct data *data)
     else if (loop->pending_record)
     {
       pw_log_debug("SYNC pulse reset: Note %d pending but state=%d (not IDLE)", i, loop->current_state);
+    }
+  }
+}
+
+void stop_sync_pending_recordings_on_pulse_reset(struct data *data)
+{
+  if (!data->sync_mode_enabled || data->pulse_loop_note == 255)
+  {
+    return;
+  }
+
+  pw_log_debug("SYNC pulse reset detected: checking for pending stops");
+
+  // Stop all recordings that are marked as pending stop
+  for (int i = 0; i < 128; i++)
+  {
+    struct memory_loop *loop = &data->memory_loops[i];
+    if (loop->pending_stop && loop->current_state == LOOP_STATE_RECORDING)
+    {
+      pw_log_info("SYNC PULSE RESET: Stopping sync'd recording for note %d (extending to pulse boundary)", i);
+
+      // Calculate the target duration (multiple of pulse loop duration)
+      uint32_t target_duration = loop->recorded_frames;
+      if (data->pulse_loop_duration > 0)
+      {
+        // Round up to next multiple of pulse duration
+        uint32_t multiple = (loop->recorded_frames + data->pulse_loop_duration - 1) / data->pulse_loop_duration;
+        if (multiple == 0)
+          multiple = 1;
+        target_duration = multiple * data->pulse_loop_duration;
+        pw_log_info("SYNC mode: Extending recording to %u frames (%ux pulse loop)", target_duration, multiple);
+      }
+
+      // Stop the recording
+      stop_loop_recording_rt(data, i);
+      usleep(1000); // 1ms
+
+      // Set the final duration to be a multiple of pulse duration
+      loop->recorded_frames = target_duration;
+
+      loop->current_state = LOOP_STATE_PLAYING;
+      loop->is_playing = true;
+      loop->pending_stop = false;
+
+      // Clear the currently recording note if this was it
+      if (data->currently_recording_note == i)
+      {
+        data->currently_recording_note = 255;
+      }
+
+      pw_log_info("SYNC PULSE RESET: Recording for note %d stopped and set to %u frames, now playing", i, target_duration);
+    }
+    else if (loop->pending_stop)
+    {
+      pw_log_debug("SYNC pulse reset: Note %d pending stop but state=%d (not RECORDING)", i, loop->current_state);
     }
   }
 }
