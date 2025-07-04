@@ -179,10 +179,10 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
     /* Give the system a moment to process the stop command */
     usleep(1000); // 1ms
 
-    loop->current_state = LOOP_STATE_PLAYING;
-    loop->is_playing = true;
+    loop->current_state = LOOP_STATE_STOPPED;
+    loop->is_playing = false;
     data->currently_recording_note = 255; // No longer recording
-    pw_log_info("TRIGGER mode: Starting playback from recorded loop for note %d", note);
+    pw_log_info("TRIGGER mode: Recording stopped for note %d, ready for playback on next Note On", note);
   }
 }
 
