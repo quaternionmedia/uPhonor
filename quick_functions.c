@@ -30,7 +30,7 @@ sf_count_t mix_all_active_loops_rt(struct data *data, float *buf, uint32_t n_sam
       if (loop->playback_position >= loop->recorded_frames)
       {
         loop->playback_position = 0; /* Loop back to beginning */
-        
+
         // Check if this is the pulse loop resetting
         if (data->sync_mode_enabled && note == data->pulse_loop_note)
         {

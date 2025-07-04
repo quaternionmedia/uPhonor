@@ -132,16 +132,16 @@ struct data
   /* Playback mode control */
   enum playback_mode
   {
-    PLAYBACK_MODE_NORMAL,  /* Note On toggles play/stop, Note Off ignored */
-    PLAYBACK_MODE_TRIGGER  /* Note On starts, Note Off stops (current behavior) */
+    PLAYBACK_MODE_NORMAL, /* Note On toggles play/stop, Note Off ignored */
+    PLAYBACK_MODE_TRIGGER /* Note On starts, Note Off stops (current behavior) */
   } current_playback_mode;
 
   /* Sync mode control (independent of playback mode) */
-  bool sync_mode_enabled;           /* Whether sync mode is active */
-  uint8_t pulse_loop_note;          /* MIDI note of the pulse/master loop (255 if none) */
-  uint32_t pulse_loop_duration;     /* Duration in frames of the pulse loop */
-  bool waiting_for_pulse_reset;     /* Whether we're waiting for pulse loop to reset before allowing new recordings */
-  uint32_t longest_loop_duration;   /* Duration of the longest currently playing loop */
+  bool sync_mode_enabled;         /* Whether sync mode is active */
+  uint8_t pulse_loop_note;        /* MIDI note of the pulse/master loop (255 if none) */
+  uint32_t pulse_loop_duration;   /* Duration in frames of the pulse loop */
+  bool waiting_for_pulse_reset;   /* Whether we're waiting for pulse loop to reset before allowing new recordings */
+  uint32_t longest_loop_duration; /* Duration of the longest currently playing loop */
 };
 
 /* Function declarations */
@@ -172,20 +172,8 @@ void stop_all_playback(struct data *data);
 /* Playback mode functions */
 void set_playback_mode_normal(struct data *data);
 void set_playback_mode_trigger(struct data *data);
-void set_playback_mode_sync(struct data *data);
 void toggle_playback_mode(struct data *data);
 const char *get_playback_mode_name(struct data *data);
-
-/* Sync mode functions */
-void enable_sync_mode(struct data *data);
-void disable_sync_mode(struct data *data);
-void toggle_sync_mode(struct data *data);
-bool is_sync_mode_enabled(struct data *data);
-void init_sync_mode(struct data *data);
-bool can_start_recording_sync(struct data *data, uint8_t midi_note);
-void set_pulse_loop(struct data *data, uint8_t midi_note);
-void check_sync_playback_reset(struct data *data);
-uint32_t get_longest_loop_duration(struct data *data);
 
 /* Sync mode functions */
 void enable_sync_mode(struct data *data);

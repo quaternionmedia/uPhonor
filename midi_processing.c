@@ -116,12 +116,13 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
     // If this loop doesn't have content and we want to record
     if (!loop->loop_ready || loop->recorded_frames == 0)
     {
-      if (!can_start_recording_sync(data, note))
-      {
-        pw_log_info("SYNC mode: Cannot start recording for note %d - waiting for pulse reset or invalid timing", note);
-        return;
-      }
+      // This is a new recording request in sync mode
+      pw_log_info("SYNC mode: Marking note %d for pending recording", note);
+      loop->volume = volume;
+      process_loops(data, NULL, note, volume);
+      return; // Exit early - don't go through normal playback mode logic
     }
+    // If loop has content, continue to normal playback mode logic below
   }
 
   if (data->current_playback_mode == PLAYBACK_MODE_NORMAL)
@@ -143,7 +144,7 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
       pw_log_info("NORMAL mode: Stopping playback for note %d", note);
       loop->current_state = LOOP_STATE_STOPPED;
       loop->is_playing = false;
-      
+
       // In sync mode, clear any pending record flag
       if (data->sync_mode_enabled)
       {
@@ -157,7 +158,7 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
       loop->current_state = LOOP_STATE_PLAYING;
       loop->is_playing = true;
       loop->playback_position = 0; // Reset to start
-      
+
       // In sync mode, clear any pending record flag
       if (data->sync_mode_enabled)
       {
@@ -235,15 +236,16 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
         if (data->pulse_loop_duration > 0)
         {
           uint32_t multiple = (loop->recorded_frames + data->pulse_loop_duration / 2) / data->pulse_loop_duration;
-          if (multiple == 0) multiple = 1;
+          if (multiple == 0)
+            multiple = 1;
           uint32_t target_duration = multiple * data->pulse_loop_duration;
-          
+
           // Adjust loop duration to be exactly a multiple of pulse duration
           if (loop->recorded_frames != target_duration)
           {
             loop->recorded_frames = target_duration;
-            pw_log_info("SYNC mode: Adjusted loop duration to %u frames (%ux pulse)", 
-                       target_duration, multiple);
+            pw_log_info("SYNC mode: Adjusted loop duration to %u frames (%ux pulse)",
+                        target_duration, multiple);
           }
         }
       }
