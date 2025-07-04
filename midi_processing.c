@@ -157,13 +157,32 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
     return;
   }
 
-  // TRIGGER mode: Note Off stops playback
+  // TRIGGER mode: Note Off stops both playback and recording
   struct memory_loop *loop = get_loop_by_note(data, note);
-  if (loop && (loop->current_state == LOOP_STATE_PLAYING))
+  if (!loop)
+  {
+    pw_log_error("Failed to get loop for note %d", note);
+    return;
+  }
+
+  if (loop->current_state == LOOP_STATE_PLAYING)
   {
     pw_log_info("TRIGGER mode: Stopping playback for note %d", note);
     loop->current_state = LOOP_STATE_STOPPED;
     loop->is_playing = false;
+  }
+  else if (loop->current_state == LOOP_STATE_RECORDING)
+  {
+    pw_log_info("TRIGGER mode: Stopping recording for note %d", note);
+    stop_loop_recording_rt(data, note);
+    
+    /* Give the system a moment to process the stop command */
+    usleep(1000); // 1ms
+    
+    loop->current_state = LOOP_STATE_PLAYING;
+    loop->is_playing = true;
+    data->currently_recording_note = 255; // No longer recording
+    pw_log_info("TRIGGER mode: Starting playback from recorded loop for note %d", note);
   }
 }
 
