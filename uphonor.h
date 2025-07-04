@@ -143,6 +143,7 @@ struct data
   uint32_t pulse_loop_duration;   /* Duration in frames of the pulse loop */
   bool waiting_for_pulse_reset;   /* Whether we're waiting for pulse loop to reset before allowing new recordings */
   uint32_t longest_loop_duration; /* Duration of the longest currently playing loop */
+  float sync_cutoff_percentage;   /* Cutoff point for sync decisions (0.0-1.0, default 0.5) */
 };
 
 /* Function declarations */

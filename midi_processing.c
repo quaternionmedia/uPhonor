@@ -7,6 +7,7 @@
 #define VOLUME_CC_NUMBER 7         /* MIDI CC 7 for volume control */
 #define PLAYBACK_MODE_CC_NUMBER 77 /* MIDI CC 77 for playback mode (normal/trigger) */
 #define SYNC_MODE_CC_NUMBER 78     /* MIDI CC 78 for sync mode on/off */
+#define SYNC_CUTOFF_CC_NUMBER 79   /* MIDI CC 79 for sync cutoff point (0-100% of pulse duration) */
 
 void handle_midi_message(struct data *data, uint8_t *midi_data)
 {
@@ -165,22 +166,36 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
         struct memory_loop *pulse_loop = get_loop_by_note(data, data->pulse_loop_note);
         if (pulse_loop && pulse_loop->is_playing && data->pulse_loop_duration > 0)
         {
-          // Start at the same absolute position as the pulse loop
+          // Calculate current pulse position and cutoff point
           uint32_t pulse_position = pulse_loop->playback_position;
-
-          if (pulse_position < loop->recorded_frames)
+          uint32_t cutoff_position = (uint32_t)(data->sync_cutoff_percentage * data->pulse_loop_duration);
+          
+          // Decide whether to sync to current pulse or wait for next
+          if (pulse_position <= cutoff_position)
           {
-            // Pulse position fits within this loop - start there
-            loop->playback_position = pulse_position;
+            // Before cutoff - sync to current pulse position
+            if (pulse_position < loop->recorded_frames)
+            {
+              // Pulse position fits within this loop - start there
+              loop->playback_position = pulse_position;
+            }
+            else
+            {
+              // Pulse position is beyond this loop's length - use modulo
+              loop->playback_position = pulse_position % loop->recorded_frames;
+            }
+            
+            pw_log_info("SYNC mode: Starting loop %d at current pulse position %u (pulse at %u, cutoff at %u)",
+                        note, loop->playback_position, pulse_position, cutoff_position);
           }
           else
           {
-            // Pulse position is beyond this loop's length - use modulo
-            loop->playback_position = pulse_position % loop->recorded_frames;
+            // After cutoff - wait for next pulse cycle (start from beginning)
+            loop->playback_position = 0;
+            
+            pw_log_info("SYNC mode: Starting loop %d from beginning - waiting for next pulse cycle (pulse at %u, cutoff at %u)",
+                        note, pulse_position, cutoff_position);
           }
-
-          pw_log_info("SYNC mode: Starting loop %d at absolute position %u (pulse at %u)",
-                      note, loop->playback_position, pulse_position);
         }
         else
         {
@@ -462,6 +477,22 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
 
     pw_log_info("MIDI CC%d: Sync mode %s (value=%d)",
                 controller, is_sync_mode_enabled(data) ? "ENABLED" : "DISABLED", value);
+  }
+  break;
+
+  case SYNC_CUTOFF_CC_NUMBER:
+  {
+    /* Convert MIDI CC value (0-127) to sync cutoff percentage (0.0-1.0) */
+    /* CC value 64 = 50% cutoff (default)
+     * CC value 0 = 0% cutoff (always sync to current pulse)
+     * CC value 127 = 100% cutoff (always wait for next pulse)
+     */
+    float cutoff_percentage = (float)(value & 0x7f) / 127.0f;
+    
+    data->sync_cutoff_percentage = cutoff_percentage;
+    
+    pw_log_info("MIDI CC%d: Sync cutoff set to %.1f%% (value=%d)",
+                controller, cutoff_percentage * 100.0f, value);
   }
   break;
 

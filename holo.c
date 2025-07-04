@@ -63,6 +63,7 @@ int init_all_memory_loops(struct data *data, uint32_t max_seconds, uint32_t samp
   data->pulse_loop_duration = 0;
   data->waiting_for_pulse_reset = false;
   data->longest_loop_duration = 0;
+  data->sync_cutoff_percentage = 0.5f; // Default to 50% cutoff
 
   for (int i = 0; i < 128; i++)
   {
@@ -264,22 +265,36 @@ void process_loops(struct data *data, struct spa_io_position *position, uint8_t 
       struct memory_loop *pulse_loop = &data->memory_loops[data->pulse_loop_note];
       if (pulse_loop->is_playing && data->pulse_loop_duration > 0)
       {
+        // Calculate current pulse position and cutoff point
         uint32_t pulse_position = pulse_loop->playback_position;
-
-        // Start at the same absolute position as the pulse loop
-        if (pulse_position < loop->recorded_frames)
+        uint32_t cutoff_position = (uint32_t)(data->sync_cutoff_percentage * data->pulse_loop_duration);
+        
+        // Decide whether to sync to current pulse or wait for next
+        if (pulse_position <= cutoff_position)
         {
-          // Pulse position fits within this loop - start there
-          loop->playback_position = pulse_position;
+          // Before cutoff - sync to current pulse position
+          if (pulse_position < loop->recorded_frames)
+          {
+            // Pulse position fits within this loop - start there
+            loop->playback_position = pulse_position;
+          }
+          else
+          {
+            // Pulse position is beyond this loop's length - use modulo
+            loop->playback_position = pulse_position % loop->recorded_frames;
+          }
+          
+          pw_log_info("SYNC mode: Starting recorded loop %d at current pulse position %u (pulse at %u, cutoff at %u)",
+                      midi_note, loop->playback_position, pulse_position, cutoff_position);
         }
         else
         {
-          // Pulse position is beyond this loop's length - use modulo
-          loop->playback_position = pulse_position % loop->recorded_frames;
+          // After cutoff - wait for next pulse cycle (start from beginning)
+          loop->playback_position = 0;
+          
+          pw_log_info("SYNC mode: Starting recorded loop %d from beginning - waiting for next pulse cycle (pulse at %u, cutoff at %u)",
+                      midi_note, pulse_position, cutoff_position);
         }
-
-        pw_log_info("SYNC mode: Starting recorded loop %d at absolute position %u (pulse at %u)",
-                    midi_note, loop->playback_position, pulse_position);
       }
     }
 
