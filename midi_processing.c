@@ -157,12 +157,44 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
       pw_log_info("NORMAL mode: Starting playback for note %d", note);
       loop->current_state = LOOP_STATE_PLAYING;
       loop->is_playing = true;
-      loop->playback_position = 0; // Reset to start
 
-      // In sync mode, clear any pending record flag
-      if (data->sync_mode_enabled)
+      // Calculate synchronized start position in sync mode
+      if (data->sync_mode_enabled && data->pulse_loop_note != 255)
       {
+        // Get the pulse loop to sync with
+        struct memory_loop *pulse_loop = get_loop_by_note(data, data->pulse_loop_note);
+        if (pulse_loop && pulse_loop->is_playing && data->pulse_loop_duration > 0)
+        {
+          // Start at the same absolute position as the pulse loop
+          uint32_t pulse_position = pulse_loop->playback_position;
+
+          if (pulse_position < loop->recorded_frames)
+          {
+            // Pulse position fits within this loop - start there
+            loop->playback_position = pulse_position;
+          }
+          else
+          {
+            // Pulse position is beyond this loop's length - use modulo
+            loop->playback_position = pulse_position % loop->recorded_frames;
+          }
+
+          pw_log_info("SYNC mode: Starting loop %d at absolute position %u (pulse at %u)",
+                      note, loop->playback_position, pulse_position);
+        }
+        else
+        {
+          // No pulse loop or pulse not playing - start from beginning
+          loop->playback_position = 0;
+          pw_log_info("SYNC mode: No active pulse loop, starting loop %d from beginning", note);
+        }
+
         loop->pending_record = false;
+      }
+      else
+      {
+        // Normal mode or no sync mode - always start from beginning
+        loop->playback_position = 0;
       }
     }
     else
@@ -177,8 +209,11 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
     process_loops(data, NULL, note, volume);
   }
 
-  // Reset audio on any note on
-  data->reset_audio = true;
+  // Reset audio only when sync mode is disabled or no sync coordination is needed
+  if (!data->sync_mode_enabled)
+  {
+    data->reset_audio = true;
+  }
 }
 
 void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t velocity)

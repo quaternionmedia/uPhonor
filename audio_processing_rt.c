@@ -129,12 +129,16 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   /* Handle audio reset (RT-safe file operations) */
   if (data->reset_audio)
   {
-    /* Reset all active memory loops */
-    for (int i = 0; i < 128; i++)
+    /* In sync mode, don't reset all loops - they should maintain their positions */
+    if (!data->sync_mode_enabled)
     {
-      if (data->memory_loops[i].loop_ready)
+      /* Reset all active memory loops */
+      for (int i = 0; i < 128; i++)
       {
-        reset_memory_loop_playback_rt(data, i);
+        if (data->memory_loops[i].loop_ready)
+        {
+          reset_memory_loop_playback_rt(data, i);
+        }
       }
     }
 
@@ -718,6 +722,34 @@ void reset_memory_loop_playback_rt(struct data *data, uint8_t midi_note)
   if (!data || midi_note >= 128)
     return;
 
+  struct memory_loop *loop = &data->memory_loops[midi_note];
+
+  // Calculate synchronized start position in sync mode
+  if (data->sync_mode_enabled && data->pulse_loop_note != 255 && midi_note != data->pulse_loop_note)
+  {
+    // Get the pulse loop to sync with
+    struct memory_loop *pulse_loop = &data->memory_loops[data->pulse_loop_note];
+    if (pulse_loop->is_playing && data->pulse_loop_duration > 0 && loop->recorded_frames > 0)
+    {
+      // Start at the same absolute position as the pulse loop
+      uint32_t pulse_position = pulse_loop->playback_position;
+
+      if (pulse_position < loop->recorded_frames)
+      {
+        // Pulse position fits within this loop - start there
+        loop->playback_position = pulse_position;
+      }
+      else
+      {
+        // Pulse position is beyond this loop's length - use modulo
+        loop->playback_position = pulse_position % loop->recorded_frames;
+      }
+
+      return; // Early return - don't reset to 0
+    }
+  }
+
+  // Default behavior - reset to beginning
   data->memory_loops[midi_note].playback_position = 0;
 }
 

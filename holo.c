@@ -258,6 +258,30 @@ void process_loops(struct data *data, struct spa_io_position *position, uint8_t 
       // Check for any pending recordings that can now start
       check_sync_pending_recordings(data);
     }
+    else if (data->sync_mode_enabled && data->pulse_loop_note != 255)
+    {
+      // This is a non-pulse loop in sync mode - start synchronized
+      struct memory_loop *pulse_loop = &data->memory_loops[data->pulse_loop_note];
+      if (pulse_loop->is_playing && data->pulse_loop_duration > 0)
+      {
+        uint32_t pulse_position = pulse_loop->playback_position;
+
+        // Start at the same absolute position as the pulse loop
+        if (pulse_position < loop->recorded_frames)
+        {
+          // Pulse position fits within this loop - start there
+          loop->playback_position = pulse_position;
+        }
+        else
+        {
+          // Pulse position is beyond this loop's length - use modulo
+          loop->playback_position = pulse_position % loop->recorded_frames;
+        }
+
+        pw_log_info("SYNC mode: Starting recorded loop %d at absolute position %u (pulse at %u)",
+                    midi_note, loop->playback_position, pulse_position);
+      }
+    }
 
     pw_log_info("Starting playback from memory loop for note %d", midi_note);
     break;
@@ -284,7 +308,12 @@ void process_loops(struct data *data, struct spa_io_position *position, uint8_t 
 
   pw_log_info("Loop state changed for note %d: state=%d, playing=%s",
               midi_note, loop->current_state, loop->is_playing ? "yes" : "no");
-  data->reset_audio = true;
+
+  // Reset audio only when sync mode is disabled or when this is a new recording
+  if (!data->sync_mode_enabled || loop->current_state == LOOP_STATE_RECORDING)
+  {
+    data->reset_audio = true;
+  }
 }
 
 // Playback mode management functions
