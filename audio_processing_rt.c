@@ -92,8 +92,10 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
 
   /* Check if any loops are ready for playback */
   bool any_loops_playing = false;
-  for (int i = 0; i < 128; i++) {
-    if (data->memory_loops[i].is_playing && data->memory_loops[i].loop_ready) {
+  for (int i = 0; i < 128; i++)
+  {
+    if (data->memory_loops[i].is_playing && data->memory_loops[i].loop_ready)
+    {
       any_loops_playing = true;
       break;
     }
@@ -128,12 +130,14 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   if (data->reset_audio)
   {
     /* Reset all active memory loops */
-    for (int i = 0; i < 128; i++) {
-      if (data->memory_loops[i].loop_ready) {
+    for (int i = 0; i < 128; i++)
+    {
+      if (data->memory_loops[i].loop_ready)
+      {
         reset_memory_loop_playback_rt(data, i);
       }
     }
-    
+
     /* Reset file playback position */
     sf_seek(data->file, 0, SEEK_SET);
     data->sample_position = 0.0; /* Reset fractional position for variable speed */
@@ -723,7 +727,7 @@ int start_loop_recording_rt(struct data *data, uint8_t midi_note, const char *fi
     return -1;
 
   struct memory_loop *loop = &data->memory_loops[midi_note];
-  
+
   if (!loop->buffer)
     return -1;
 
@@ -766,9 +770,9 @@ int stop_loop_recording_rt(struct data *data, uint8_t midi_note)
 {
   if (!data || midi_note >= 128)
     return -1;
-    
+
   struct memory_loop *loop = &data->memory_loops[midi_note];
-  
+
   if (!loop->recording_to_memory)
     return -1;
 
@@ -808,7 +812,7 @@ bool store_audio_in_memory_loop_rt(struct data *data, uint8_t midi_note, const f
     return false;
 
   struct memory_loop *loop = &data->memory_loops[midi_note];
-  
+
   if (!loop->buffer || !loop->recording_to_memory)
     return false;
 
@@ -861,7 +865,7 @@ sf_count_t read_audio_frames_from_memory_loop_rt(struct data *data, float *buf, 
 
 sf_count_t read_audio_frames_from_memory_loop_variable_speed_rt(struct data *data, float *buf, uint32_t n_samples)
 {
-  // TEMPORARY: Use first loop - this function needs proper multi-loop implementation  
+  // TEMPORARY: Use first loop - this function needs proper multi-loop implementation
   if (!data || !data->memory_loops[0].buffer || !data->memory_loops[0].loop_ready || !buf)
     return 0;
 

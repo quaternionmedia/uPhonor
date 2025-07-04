@@ -67,7 +67,8 @@ struct data
   char *record_filename;
 
   /* Global file playback state (separate from per-loop states) */
-  enum holo_state {
+  enum holo_state
+  {
     HOLO_STATE_IDLE,
     HOLO_STATE_PLAYING,
     HOLO_STATE_STOPPED
@@ -112,7 +113,7 @@ struct data
     char loop_filename[512];    /* Filename for eventual file write */
     uint8_t midi_note;          /* MIDI note number (0-127) that controls this loop */
     float volume;               /* Individual volume for this loop (from note velocity) */
-    
+
     /* Per-loop state management */
     enum loop_state
     {
@@ -121,11 +122,18 @@ struct data
       LOOP_STATE_PLAYING,
       LOOP_STATE_STOPPED
     } current_state;
-  } memory_loops[128];          /* One loop for each MIDI note (0-127) */
-  
+  } memory_loops[128]; /* One loop for each MIDI note (0-127) */
+
   /* Global loop management */
-  uint8_t active_loop_count;    /* Number of loops that have been used */
+  uint8_t active_loop_count;        /* Number of loops that have been used */
   uint8_t currently_recording_note; /* MIDI note currently being recorded (-1 if none) */
+
+  /* Playback mode control */
+  enum playback_mode
+  {
+    PLAYBACK_MODE_NORMAL, /* Note On toggles play/stop, Note Off ignored */
+    PLAYBACK_MODE_TRIGGER /* Note On starts, Note Off stops (current behavior) */
+  } current_playback_mode;
 };
 
 /* Function declarations */
@@ -152,6 +160,12 @@ void cleanup_all_memory_loops(struct data *data);
 struct memory_loop *get_loop_by_note(struct data *data, uint8_t midi_note);
 void stop_all_recordings(struct data *data);
 void stop_all_playback(struct data *data);
+
+/* Playback mode functions */
+void set_playback_mode_normal(struct data *data);
+void set_playback_mode_trigger(struct data *data);
+void toggle_playback_mode(struct data *data);
+const char *get_playback_mode_name(struct data *data);
 
 /* Rubberband functions */
 int init_rubberband(struct data *data);

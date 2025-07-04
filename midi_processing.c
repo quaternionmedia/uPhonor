@@ -5,6 +5,7 @@
 #define PITCH_CC_NUMBER 75         /* MIDI CC 75 for pitch shift control */
 #define RECORD_PLAYER_CC_NUMBER 76 /* MIDI CC 76 for record player mode */
 #define VOLUME_CC_NUMBER 7         /* MIDI CC 7 for volume control */
+#define PLAYBACK_MODE_CC_NUMBER 77 /* MIDI CC 77 for playback mode (normal/trigger) */
 
 void handle_midi_message(struct data *data, uint8_t *midi_data)
 {
@@ -97,10 +98,48 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
   // Convert MIDI velocity to volume (0.0-1.0)
   float volume = (float)(velocity & 0x7f) / 127.0f;
 
-  pw_log_info("Note On: channel=%d, note=%d, velocity=%d, volume=%.2f", channel, note, velocity, volume);
+  pw_log_info("Note On: channel=%d, note=%d, velocity=%d, volume=%.2f, mode=%s",
+              channel, note, velocity, volume, get_playback_mode_name(data));
 
-  // Process the loop state change for the specific MIDI note
-  process_loops(data, NULL, note, volume);
+  if (data->current_playback_mode == PLAYBACK_MODE_NORMAL)
+  {
+    // NORMAL mode: Note On toggles between play and stop
+    struct memory_loop *loop = get_loop_by_note(data, note);
+    if (!loop)
+    {
+      pw_log_error("Failed to get loop for note %d", note);
+      return;
+    }
+
+    // Set volume for this loop
+    loop->volume = volume;
+
+    if (loop->current_state == LOOP_STATE_PLAYING)
+    {
+      // Currently playing, so stop it
+      pw_log_info("NORMAL mode: Stopping playback for note %d", note);
+      loop->current_state = LOOP_STATE_STOPPED;
+      loop->is_playing = false;
+    }
+    else if (loop->loop_ready && loop->recorded_frames > 0)
+    {
+      // Has content and not playing, so start it
+      pw_log_info("NORMAL mode: Starting playback for note %d", note);
+      loop->current_state = LOOP_STATE_PLAYING;
+      loop->is_playing = true;
+      loop->playback_position = 0; // Reset to start
+    }
+    else
+    {
+      // No content yet, start recording or process normally
+      process_loops(data, NULL, note, volume);
+    }
+  }
+  else
+  {
+    // TRIGGER mode: Note On starts playback (current behavior)
+    process_loops(data, NULL, note, volume);
+  }
 
   // Reset audio on any note on
   data->reset_audio = true;
@@ -108,12 +147,21 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
 
 void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t velocity)
 {
-  pw_log_info("Note Off: channel=%d, note=%d, velocity=%d", channel, note, velocity);
-  
-  // For note off, we could implement loop stop functionality
+  pw_log_info("Note Off: channel=%d, note=%d, velocity=%d, mode=%s",
+              channel, note, velocity, get_playback_mode_name(data));
+
+  if (data->current_playback_mode == PLAYBACK_MODE_NORMAL)
+  {
+    // NORMAL mode: Note Off messages are ignored
+    pw_log_info("NORMAL mode: Ignoring Note Off for note %d", note);
+    return;
+  }
+
+  // TRIGGER mode: Note Off stops playback
   struct memory_loop *loop = get_loop_by_note(data, note);
-  if (loop && (loop->current_state == LOOP_STATE_PLAYING)) {
-    pw_log_info("Stopping playback for note %d", note);
+  if (loop && (loop->current_state == LOOP_STATE_PLAYING))
+  {
+    pw_log_info("TRIGGER mode: Stopping playback for note %d", note);
     loop->current_state = LOOP_STATE_STOPPED;
     loop->is_playing = false;
   }
@@ -235,6 +283,31 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
 
     pw_log_info("MIDI CC%d: Volume set to %.2f", controller, volume);
   }
+  break;
+
+  case PLAYBACK_MODE_CC_NUMBER:
+  {
+    /* Toggle playback mode on any value > 0, or set specific mode based on value */
+    if (value >= 64)
+    {
+      /* High values (64-127) = TRIGGER mode */
+      set_playback_mode_trigger(data);
+    }
+    else if (value > 0)
+    {
+      /* Low values (1-63) = NORMAL mode */
+      set_playback_mode_normal(data);
+    }
+    else
+    {
+      /* Value 0 = toggle mode */
+      toggle_playback_mode(data);
+    }
+
+    pw_log_info("MIDI CC%d: Playback mode set to %s (value=%d)",
+                controller, get_playback_mode_name(data), value);
+  }
+  break;
 
   default:
     pw_log_debug("Unhandled CC: controller=%d, value=%d", controller, value);
