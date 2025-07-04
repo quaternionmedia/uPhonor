@@ -175,10 +175,10 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
   {
     pw_log_info("TRIGGER mode: Stopping recording for note %d", note);
     stop_loop_recording_rt(data, note);
-    
+
     /* Give the system a moment to process the stop command */
     usleep(1000); // 1ms
-    
+
     loop->current_state = LOOP_STATE_PLAYING;
     loop->is_playing = true;
     data->currently_recording_note = 255; // No longer recording
