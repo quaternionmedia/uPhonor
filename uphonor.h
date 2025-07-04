@@ -181,6 +181,7 @@ void disable_sync_mode(struct data *data);
 void toggle_sync_mode(struct data *data);
 bool is_sync_mode_enabled(struct data *data);
 void check_sync_pending_recordings(struct data *data);
+void start_sync_pending_recordings_on_pulse_reset(struct data *data);
 
 /* Rubberband functions */
 int init_rubberband(struct data *data);

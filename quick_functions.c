@@ -46,7 +46,7 @@ sf_count_t mix_all_active_loops_rt(struct data *data, float *buf, uint32_t n_sam
   // Check for pending sync recordings if pulse loop reset
   if (pulse_loop_reset)
   {
-    check_sync_pending_recordings(data);
+    start_sync_pending_recordings_on_pulse_reset(data);
   }
 
   return any_playing ? n_samples : 0;

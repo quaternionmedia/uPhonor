@@ -159,7 +159,7 @@ void process_loops(struct data *data, struct spa_io_position *position, uint8_t 
       // In sync mode with active pulse loop, don't start recording immediately
       // This should be handled by sync timing logic elsewhere
       pw_log_info("Sync mode active - recording for note %d will wait for pulse loop sync", midi_note);
-      
+
       // Only mark as pending if not already pending
       if (!loop->pending_record)
       {
@@ -170,7 +170,7 @@ void process_loops(struct data *data, struct spa_io_position *position, uint8_t 
       {
         pw_log_info("Note %d already pending for sync recording", midi_note);
       }
-      
+
       // Also check if we can start recording immediately (if pulse loop just reset)
       check_sync_pending_recordings(data);
       return;
@@ -226,17 +226,17 @@ void process_loops(struct data *data, struct spa_io_position *position, uint8_t 
     loop->current_state = LOOP_STATE_PLAYING;
     loop->is_playing = true;
     data->currently_recording_note = 255; // No longer recording
-    
+
     // In sync mode, if this is the pulse loop, ensure it's playing and set duration
     if (data->sync_mode_enabled && midi_note == data->pulse_loop_note)
     {
       data->pulse_loop_duration = loop->recorded_frames;
-      pw_log_info("SYNC mode: Pulse loop (note %d) recorded with %u frames, now playing", 
+      pw_log_info("SYNC mode: Pulse loop (note %d) recorded with %u frames, now playing",
                   midi_note, data->pulse_loop_duration);
       // Check for any pending recordings that can now start
       check_sync_pending_recordings(data);
     }
-    
+
     pw_log_info("Starting playback from memory loop for note %d", midi_note);
     break;
 
@@ -430,6 +430,9 @@ void check_sync_playback_reset(struct data *data)
       // Allow new recordings to start
       data->waiting_for_pulse_reset = false;
       pw_log_info("SYNC mode: All loops reset to beginning, new recordings allowed");
+
+      // Start any pending recordings
+      start_sync_pending_recordings_on_pulse_reset(data);
       break;
     }
   }
@@ -454,27 +457,55 @@ void check_sync_pending_recordings(struct data *data)
 {
   if (!data->sync_mode_enabled || data->pulse_loop_note == 255)
   {
-    pw_log_debug("SYNC check: mode=%s, pulse_note=%d - returning early", 
-                 data->sync_mode_enabled ? "ON" : "OFF", data->pulse_loop_note);
+    return;
+  }
+
+  // This function just checks status - it doesn't start recordings
+  // Recordings are only started by start_sync_pending_recordings_on_pulse_reset()
+
+  // Check if pulse loop is actually playing
+  struct memory_loop *pulse_loop = get_loop_by_note(data, data->pulse_loop_note);
+  if (!pulse_loop || !pulse_loop->is_playing)
+  {
+    pw_log_debug("SYNC check: Pulse loop (note %d) not playing - cannot sync",
+                 data->pulse_loop_note);
+    return;
+  }
+
+  // Count pending recordings
+  int pending_count = 0;
+  for (int i = 0; i < 128; i++)
+  {
+    struct memory_loop *loop = &data->memory_loops[i];
+    if (loop->pending_record && loop->current_state == LOOP_STATE_IDLE)
+    {
+      pending_count++;
+    }
+  }
+
+  if (pending_count > 0)
+  {
+    pw_log_debug("SYNC check: %d recordings pending for next pulse reset", pending_count);
+  }
+}
+
+void start_sync_pending_recordings_on_pulse_reset(struct data *data)
+{
+  if (!data->sync_mode_enabled || data->pulse_loop_note == 255)
+  {
     return;
   }
 
   // Only start one pending recording at a time
   if (data->currently_recording_note != 255)
   {
-    pw_log_debug("SYNC check: Currently recording note %d - cannot start new recording", 
+    pw_log_debug("SYNC pulse reset: Currently recording note %d - cannot start new recording",
                  data->currently_recording_note);
     return;
   }
 
-  // Check if pulse loop is actually playing
-  struct memory_loop *pulse_loop = get_loop_by_note(data, data->pulse_loop_note);
-  if (!pulse_loop || !pulse_loop->is_playing)
-  {
-    pw_log_debug("SYNC check: Pulse loop (note %d) not playing - cannot sync", 
-                 data->pulse_loop_note);
-    return;
-  }
+  // This function is only called when pulse loop resets, so we know it's playing
+  pw_log_debug("SYNC pulse reset detected: checking for pending recordings");
 
   // Find the first pending recording and start it
   for (int i = 0; i < 128; i++)
@@ -482,7 +513,7 @@ void check_sync_pending_recordings(struct data *data)
     struct memory_loop *loop = &data->memory_loops[i];
     if (loop->pending_record && loop->current_state == LOOP_STATE_IDLE)
     {
-      pw_log_info("SYNC: Starting sync'd recording for note %d", i);
+      pw_log_info("SYNC PULSE RESET: Starting sync'd recording for note %d", i);
 
       // Generate timestamp-based filename
       time_t now;
@@ -501,12 +532,12 @@ void check_sync_pending_recordings(struct data *data)
       data->active_loop_count++;
 
       // Only start one recording per sync cycle
-      pw_log_info("SYNC: Started recording for note %d, now recording note %d", i, data->currently_recording_note);
+      pw_log_info("SYNC PULSE RESET: Started recording for note %d, now recording note %d", i, data->currently_recording_note);
       break;
     }
     else if (loop->pending_record)
     {
-      pw_log_debug("SYNC check: Note %d pending but state=%d (not IDLE)", i, loop->current_state);
+      pw_log_debug("SYNC pulse reset: Note %d pending but state=%d (not IDLE)", i, loop->current_state);
     }
   }
 }
