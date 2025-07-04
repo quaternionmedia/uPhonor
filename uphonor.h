@@ -109,6 +109,7 @@ struct data
     bool loop_ready;            /* Whether loop is ready for playback */
     bool recording_to_memory;   /* Whether we're currently recording to memory */
     bool is_playing;            /* Whether this loop is currently playing */
+    bool pending_record;        /* Whether this loop is waiting to start recording in sync mode */
     uint32_t sample_rate;       /* Sample rate for the recorded loop */
     char loop_filename[512];    /* Filename for eventual file write */
     uint8_t midi_note;          /* MIDI note number (0-127) that controls this loop */
@@ -132,11 +133,11 @@ struct data
   enum playback_mode
   {
     PLAYBACK_MODE_NORMAL,  /* Note On toggles play/stop, Note Off ignored */
-    PLAYBACK_MODE_TRIGGER, /* Note On starts, Note Off stops (current behavior) */
-    PLAYBACK_MODE_SYNC     /* Synchronized recording and playback with pulse loop */
+    PLAYBACK_MODE_TRIGGER  /* Note On starts, Note Off stops (current behavior) */
   } current_playback_mode;
 
-  /* Sync mode specific fields */
+  /* Sync mode control (independent of playback mode) */
+  bool sync_mode_enabled;           /* Whether sync mode is active */
   uint8_t pulse_loop_note;          /* MIDI note of the pulse/master loop (255 if none) */
   uint32_t pulse_loop_duration;     /* Duration in frames of the pulse loop */
   bool waiting_for_pulse_reset;     /* Whether we're waiting for pulse loop to reset before allowing new recordings */
@@ -176,11 +177,22 @@ void toggle_playback_mode(struct data *data);
 const char *get_playback_mode_name(struct data *data);
 
 /* Sync mode functions */
+void enable_sync_mode(struct data *data);
+void disable_sync_mode(struct data *data);
+void toggle_sync_mode(struct data *data);
+bool is_sync_mode_enabled(struct data *data);
 void init_sync_mode(struct data *data);
 bool can_start_recording_sync(struct data *data, uint8_t midi_note);
 void set_pulse_loop(struct data *data, uint8_t midi_note);
 void check_sync_playback_reset(struct data *data);
 uint32_t get_longest_loop_duration(struct data *data);
+
+/* Sync mode functions */
+void enable_sync_mode(struct data *data);
+void disable_sync_mode(struct data *data);
+void toggle_sync_mode(struct data *data);
+bool is_sync_mode_enabled(struct data *data);
+void check_sync_pending_recordings(struct data *data);
 
 /* Rubberband functions */
 int init_rubberband(struct data *data);

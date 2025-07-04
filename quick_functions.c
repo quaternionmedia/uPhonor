@@ -12,6 +12,7 @@ sf_count_t mix_all_active_loops_rt(struct data *data, float *buf, uint32_t n_sam
   }
 
   bool any_playing = false;
+  bool pulse_loop_reset = false;
 
   /* Mix all active loops */
   for (int note = 0; note < 128; note++)
@@ -29,11 +30,23 @@ sf_count_t mix_all_active_loops_rt(struct data *data, float *buf, uint32_t n_sam
       if (loop->playback_position >= loop->recorded_frames)
       {
         loop->playback_position = 0; /* Loop back to beginning */
+        
+        // Check if this is the pulse loop resetting
+        if (data->sync_mode_enabled && note == data->pulse_loop_note)
+        {
+          pulse_loop_reset = true;
+        }
       }
 
       buf[i] += loop->buffer[loop->playback_position] * loop->volume;
       loop->playback_position++;
     }
+  }
+
+  // Check for pending sync recordings if pulse loop reset
+  if (pulse_loop_reset)
+  {
+    check_sync_pending_recordings(data);
   }
 
   return any_playing ? n_samples : 0;

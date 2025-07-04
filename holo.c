@@ -58,6 +58,7 @@ int init_all_memory_loops(struct data *data, uint32_t max_seconds, uint32_t samp
   data->current_playback_mode = PLAYBACK_MODE_NORMAL; // Default to normal mode
 
   // Initialize sync mode fields
+  data->sync_mode_enabled = false;    // Sync mode disabled by default
   data->pulse_loop_note = 255;        // No pulse loop set
   data->pulse_loop_duration = 0;
   data->waiting_for_pulse_reset = false;
@@ -73,6 +74,7 @@ int init_all_memory_loops(struct data *data, uint32_t max_seconds, uint32_t samp
     loop->current_state = LOOP_STATE_IDLE;
     loop->sample_rate = sample_rate;
     loop->volume = 1.0f; // Default volume
+    loop->pending_record = false; // Not waiting to record
 
     // Allocate buffer (60 seconds worth of audio)
     loop->buffer_size = max_seconds * sample_rate; // frames (mono)
@@ -151,6 +153,17 @@ void process_loops(struct data *data, struct spa_io_position *position, uint8_t 
   switch (loop->current_state)
   {
   case LOOP_STATE_IDLE:
+    // Check sync mode constraints
+    if (data->sync_mode_enabled && data->pulse_loop_note != 255)
+    {
+      // In sync mode with active pulse loop, don't start recording immediately
+      // This should be handled by sync timing logic elsewhere
+      pw_log_info("Sync mode active - recording for note %d will wait for pulse loop sync", midi_note);
+      // Mark as pending recording instead of starting immediately
+      loop->pending_record = true;
+      return;
+    }
+
     // If another loop is recording, stop it first
     if (data->currently_recording_note != 255 && data->currently_recording_note != midi_note)
     {
@@ -163,6 +176,13 @@ void process_loops(struct data *data, struct spa_io_position *position, uint8_t 
         recording_loop->current_state = LOOP_STATE_PLAYING;
         recording_loop->is_playing = true;
       }
+    }
+
+    // Set as pulse loop if none exists
+    if (data->pulse_loop_note == 255)
+    {
+      data->pulse_loop_note = midi_note;
+      pw_log_info("Setting note %d as pulse loop", midi_note);
     }
 
     pw_log_info("Starting memory loop recording for note %d", midi_note);
@@ -235,22 +255,11 @@ void set_playback_mode_trigger(struct data *data)
   pw_log_info("Playback mode set to TRIGGER (Note On starts, Note Off stops)");
 }
 
-void set_playback_mode_sync(struct data *data)
-{
-  data->current_playback_mode = PLAYBACK_MODE_SYNC;
-  init_sync_mode(data);
-  pw_log_info("Playback mode set to SYNC (Synchronized recording and playback with pulse loop)");
-}
-
 void toggle_playback_mode(struct data *data)
 {
   if (data->current_playback_mode == PLAYBACK_MODE_NORMAL)
   {
     set_playback_mode_trigger(data);
-  }
-  else if (data->current_playback_mode == PLAYBACK_MODE_TRIGGER)
-  {
-    set_playback_mode_sync(data);
   }
   else
   {
@@ -266,14 +275,58 @@ const char *get_playback_mode_name(struct data *data)
     return "NORMAL";
   case PLAYBACK_MODE_TRIGGER:
     return "TRIGGER";
-  case PLAYBACK_MODE_SYNC:
-    return "SYNC";
   default:
     return "UNKNOWN";
   }
 }
 
-/* Sync mode functions */
+/* Sync mode functions (independent of playback mode) */
+void enable_sync_mode(struct data *data)
+{
+  data->sync_mode_enabled = true;
+  init_sync_mode(data);
+  pw_log_info("Sync mode ENABLED - waiting for first loop to set pulse");
+}
+
+void disable_sync_mode(struct data *data)
+{
+  data->sync_mode_enabled = false;
+  data->pulse_loop_note = 255; // Clear pulse loop
+  data->pulse_loop_duration = 0;
+  data->waiting_for_pulse_reset = false;
+  data->longest_loop_duration = 0;
+  
+  // Clear any pending recordings and allow them to start immediately
+  for (int i = 0; i < 128; i++)
+  {
+    struct memory_loop *loop = &data->memory_loops[i];
+    if (loop->pending_record)
+    {
+      loop->pending_record = false;
+      pw_log_info("Clearing pending recording for note %d due to sync mode disable", i);
+    }
+  }
+  
+  pw_log_info("Sync mode DISABLED - all loops now independent");
+}
+
+void toggle_sync_mode(struct data *data)
+{
+  if (data->sync_mode_enabled)
+  {
+    disable_sync_mode(data);
+  }
+  else
+  {
+    enable_sync_mode(data);
+  }
+}
+
+bool is_sync_mode_enabled(struct data *data)
+{
+  return data->sync_mode_enabled;
+}
+
 void init_sync_mode(struct data *data)
 {
   data->pulse_loop_note = 255; // No pulse loop set
@@ -312,7 +365,7 @@ void set_pulse_loop(struct data *data, uint8_t midi_note)
 
 void check_sync_playback_reset(struct data *data)
 {
-  if (data->current_playback_mode != PLAYBACK_MODE_SYNC)
+  if (!data->sync_mode_enabled)
     return;
     
   // Find the longest currently playing loop
@@ -371,4 +424,44 @@ uint32_t get_longest_loop_duration(struct data *data)
     }
   }
   return longest;
+}
+
+/* Check for pending recordings and start them if sync conditions are met */
+void check_sync_pending_recordings(struct data *data)
+{
+  if (!data->sync_mode_enabled || data->pulse_loop_note == 255)
+    return;
+
+  // Only start one pending recording at a time
+  if (data->currently_recording_note != 255)
+    return;
+
+  // Find the first pending recording and start it
+  for (int i = 0; i < 128; i++)
+  {
+    struct memory_loop *loop = &data->memory_loops[i];
+    if (loop->pending_record && loop->current_state == LOOP_STATE_IDLE)
+    {
+      pw_log_info("Starting sync'd recording for note %d", i);
+      
+      // Generate timestamp-based filename
+      time_t now;
+      time(&now);
+      struct tm *tm_info = localtime(&now);
+      snprintf(loop->loop_filename, sizeof(loop->loop_filename),
+               "loop_note_%03d_%04d-%02d-%02d_%02d-%02d-%02d.wav",
+               i,
+               tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday,
+               tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
+
+      start_loop_recording_rt(data, i, loop->loop_filename);
+      loop->current_state = LOOP_STATE_RECORDING;
+      loop->pending_record = false;
+      data->currently_recording_note = i;
+      data->active_loop_count++;
+      
+      // Only start one recording per sync cycle
+      break;
+    }
+  }
 }

@@ -6,6 +6,7 @@
 #define RECORD_PLAYER_CC_NUMBER 76 /* MIDI CC 76 for record player mode */
 #define VOLUME_CC_NUMBER 7         /* MIDI CC 7 for volume control */
 #define PLAYBACK_MODE_CC_NUMBER 77 /* MIDI CC 77 for playback mode (normal/trigger) */
+#define SYNC_MODE_CC_NUMBER 78     /* MIDI CC 78 for sync mode on/off */
 
 void handle_midi_message(struct data *data, uint8_t *midi_data)
 {
@@ -98,8 +99,30 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
   // Convert MIDI velocity to volume (0.0-1.0)
   float volume = (float)(velocity & 0x7f) / 127.0f;
 
-  pw_log_info("Note On: channel=%d, note=%d, velocity=%d, volume=%.2f, mode=%s",
-              channel, note, velocity, volume, get_playback_mode_name(data));
+  pw_log_info("Note On: channel=%d, note=%d, velocity=%d, volume=%.2f, mode=%s, sync=%s",
+              channel, note, velocity, volume, get_playback_mode_name(data),
+              is_sync_mode_enabled(data) ? "ON" : "OFF");
+
+  // Check sync mode constraints before processing
+  if (is_sync_mode_enabled(data))
+  {
+    struct memory_loop *loop = get_loop_by_note(data, note);
+    if (!loop)
+    {
+      pw_log_error("Failed to get loop for note %d", note);
+      return;
+    }
+
+    // If this loop doesn't have content and we want to record
+    if (!loop->loop_ready || loop->recorded_frames == 0)
+    {
+      if (!can_start_recording_sync(data, note))
+      {
+        pw_log_info("SYNC mode: Cannot start recording for note %d - waiting for pulse reset or invalid timing", note);
+        return;
+      }
+    }
+  }
 
   if (data->current_playback_mode == PLAYBACK_MODE_NORMAL)
   {
@@ -120,6 +143,12 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
       pw_log_info("NORMAL mode: Stopping playback for note %d", note);
       loop->current_state = LOOP_STATE_STOPPED;
       loop->is_playing = false;
+      
+      // In sync mode, clear any pending record flag
+      if (data->sync_mode_enabled)
+      {
+        loop->pending_record = false;
+      }
     }
     else if (loop->loop_ready && loop->recorded_frames > 0)
     {
@@ -128,6 +157,12 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
       loop->current_state = LOOP_STATE_PLAYING;
       loop->is_playing = true;
       loop->playback_position = 0; // Reset to start
+      
+      // In sync mode, clear any pending record flag
+      if (data->sync_mode_enabled)
+      {
+        loop->pending_record = false;
+      }
     }
     else
     {
@@ -135,53 +170,10 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
       process_loops(data, NULL, note, volume);
     }
   }
-  else if (data->current_playback_mode == PLAYBACK_MODE_TRIGGER)
+  else
   {
     // TRIGGER mode: Note On starts playback (current behavior)
     process_loops(data, NULL, note, volume);
-  }
-  else if (data->current_playback_mode == PLAYBACK_MODE_SYNC)
-  {
-    // SYNC mode: Check if recording is allowed
-    struct memory_loop *loop = get_loop_by_note(data, note);
-    if (!loop)
-    {
-      pw_log_error("Failed to get loop for note %d", note);
-      return;
-    }
-
-    // Set volume for this loop
-    loop->volume = volume;
-
-    if (loop->current_state == LOOP_STATE_IDLE)
-    {
-      // Check if we can start recording
-      if (can_start_recording_sync(data, note))
-      {
-        pw_log_info("SYNC mode: Starting recording for note %d", note);
-        process_loops(data, NULL, note, volume);
-        set_pulse_loop(data, note); // Set as pulse loop if none exists
-      }
-      else
-      {
-        pw_log_info("SYNC mode: Cannot start recording for note %d - waiting for pulse reset", note);
-      }
-    }
-    else if (loop->current_state == LOOP_STATE_STOPPED && loop->loop_ready)
-    {
-      // Start playback
-      pw_log_info("SYNC mode: Starting playback for note %d", note);
-      loop->current_state = LOOP_STATE_PLAYING;
-      loop->is_playing = true;
-      loop->playback_position = 0; // Reset to start
-    }
-    else if (loop->current_state == LOOP_STATE_PLAYING)
-    {
-      // Stop playback
-      pw_log_info("SYNC mode: Stopping playback for note %d", note);
-      loop->current_state = LOOP_STATE_STOPPED;
-      loop->is_playing = false;
-    }
   }
 
   // Reset audio on any note on
@@ -190,65 +182,14 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
 
 void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t velocity)
 {
-  pw_log_info("Note Off: channel=%d, note=%d, velocity=%d, mode=%s",
-              channel, note, velocity, get_playback_mode_name(data));
+  pw_log_info("Note Off: channel=%d, note=%d, velocity=%d, mode=%s, sync=%s",
+              channel, note, velocity, get_playback_mode_name(data),
+              is_sync_mode_enabled(data) ? "ON" : "OFF");
 
   if (data->current_playback_mode == PLAYBACK_MODE_NORMAL)
   {
     // NORMAL mode: Note Off messages are ignored
     pw_log_info("NORMAL mode: Ignoring Note Off for note %d", note);
-    return;
-  }
-  else if (data->current_playback_mode == PLAYBACK_MODE_SYNC)
-  {
-    // SYNC mode: Note Off stops recording only
-    struct memory_loop *loop = get_loop_by_note(data, note);
-    if (!loop)
-    {
-      pw_log_error("Failed to get loop for note %d", note);
-      return;
-    }
-
-    if (loop->current_state == LOOP_STATE_RECORDING)
-    {
-      pw_log_info("SYNC mode: Stopping recording for note %d", note);
-      stop_loop_recording_rt(data, note);
-
-      /* Give the system a moment to process the stop command */
-      usleep(1000); // 1ms
-
-      loop->current_state = LOOP_STATE_STOPPED;
-      loop->is_playing = false;
-      data->currently_recording_note = 255; // No longer recording
-
-      // Update pulse loop duration if this is the pulse loop
-      if (note == data->pulse_loop_note)
-      {
-        data->pulse_loop_duration = loop->recorded_frames;
-        data->waiting_for_pulse_reset = true; // Prevent new recordings until reset
-        pw_log_info("SYNC mode: Pulse loop recorded with %u frames", data->pulse_loop_duration);
-      }
-      else
-      {
-        // For non-pulse loops, check if duration is a multiple of pulse duration
-        if (data->pulse_loop_duration > 0)
-        {
-          uint32_t multiple = (loop->recorded_frames + data->pulse_loop_duration / 2) / data->pulse_loop_duration;
-          if (multiple == 0) multiple = 1;
-          uint32_t target_duration = multiple * data->pulse_loop_duration;
-          
-          // Adjust loop duration to be exactly a multiple of pulse duration
-          if (loop->recorded_frames != target_duration)
-          {
-            loop->recorded_frames = target_duration;
-            pw_log_info("SYNC mode: Adjusted loop duration to %u frames (%ux pulse)", 
-                       target_duration, multiple);
-          }
-        }
-      }
-
-      pw_log_info("SYNC mode: Recording stopped for note %d, ready for playback", note);
-    }
     return;
   }
 
@@ -277,6 +218,37 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
     loop->current_state = LOOP_STATE_STOPPED;
     loop->is_playing = false;
     data->currently_recording_note = 255; // No longer recording
+
+    // Handle sync mode logic if enabled
+    if (is_sync_mode_enabled(data))
+    {
+      // Update pulse loop duration if this is the pulse loop
+      if (note == data->pulse_loop_note)
+      {
+        data->pulse_loop_duration = loop->recorded_frames;
+        data->waiting_for_pulse_reset = true; // Prevent new recordings until reset
+        pw_log_info("SYNC mode: Pulse loop recorded with %u frames", data->pulse_loop_duration);
+      }
+      else
+      {
+        // For non-pulse loops, check if duration is a multiple of pulse duration
+        if (data->pulse_loop_duration > 0)
+        {
+          uint32_t multiple = (loop->recorded_frames + data->pulse_loop_duration / 2) / data->pulse_loop_duration;
+          if (multiple == 0) multiple = 1;
+          uint32_t target_duration = multiple * data->pulse_loop_duration;
+          
+          // Adjust loop duration to be exactly a multiple of pulse duration
+          if (loop->recorded_frames != target_duration)
+          {
+            loop->recorded_frames = target_duration;
+            pw_log_info("SYNC mode: Adjusted loop duration to %u frames (%ux pulse)", 
+                       target_duration, multiple);
+          }
+        }
+      }
+    }
+
     pw_log_info("TRIGGER mode: Recording stopped for note %d, ready for playback on next Note On", note);
   }
 }
@@ -402,19 +374,14 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
   case PLAYBACK_MODE_CC_NUMBER:
   {
     /* Set playback mode based on value ranges */
-    if (value >= 85)
+    if (value >= 64)
     {
-      /* High values (85-127) = SYNC mode */
-      set_playback_mode_sync(data);
-    }
-    else if (value >= 43)
-    {
-      /* Mid values (43-84) = TRIGGER mode */
+      /* High values (64-127) = TRIGGER mode */
       set_playback_mode_trigger(data);
     }
     else if (value > 0)
     {
-      /* Low values (1-42) = NORMAL mode */
+      /* Low values (1-63) = NORMAL mode */
       set_playback_mode_normal(data);
     }
     else
@@ -425,6 +392,30 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
 
     pw_log_info("MIDI CC%d: Playback mode set to %s (value=%d)",
                 controller, get_playback_mode_name(data), value);
+  }
+  break;
+
+  case SYNC_MODE_CC_NUMBER:
+  {
+    /* Toggle sync mode based on value */
+    if (value >= 64)
+    {
+      /* High values (64-127) = Enable sync mode */
+      enable_sync_mode(data);
+    }
+    else if (value > 0)
+    {
+      /* Low values (1-63) = Disable sync mode */
+      disable_sync_mode(data);
+    }
+    else
+    {
+      /* Value 0 = Toggle sync mode */
+      toggle_sync_mode(data);
+    }
+
+    pw_log_info("MIDI CC%d: Sync mode %s (value=%d)",
+                controller, is_sync_mode_enabled(data) ? "ENABLED" : "DISABLED", value);
   }
   break;
 
