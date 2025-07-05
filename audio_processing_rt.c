@@ -60,6 +60,12 @@ void handle_audio_input_rt(struct data *data, uint32_t n_samples)
     }
   }
 
+  /* Always store audio in backfill buffer for potential sync recording (RT-safe) */
+  if (data->sync_mode_enabled && data->recording_backfill_buffer)
+  {
+    store_audio_in_backfill_buffer(data, in, n_samples);
+  }
+
   /* Store audio in memory loop if any loop recording is active (RT-safe) */
   if (data->currently_recording_note < 128)
   {

@@ -139,12 +139,19 @@ struct data
   } current_playback_mode;
 
   /* Sync mode control (independent of playback mode) */
-  bool sync_mode_enabled;         /* Whether sync mode is active */
-  uint8_t pulse_loop_note;        /* MIDI note of the pulse/master loop (255 if none) */
-  uint32_t pulse_loop_duration;   /* Duration in frames of the pulse loop */
-  bool waiting_for_pulse_reset;   /* Whether we're waiting for pulse loop to reset before allowing new recordings */
-  uint32_t longest_loop_duration; /* Duration of the longest currently playing loop */
-  float sync_cutoff_percentage;   /* Cutoff point for sync decisions (0.0-1.0, default 0.5) */
+  bool sync_mode_enabled;                 /* Whether sync mode is active */
+  uint8_t pulse_loop_note;                /* MIDI note of the pulse/master loop (255 if none) */
+  uint32_t pulse_loop_duration;           /* Duration in frames of the pulse loop */
+  bool waiting_for_pulse_reset;           /* Whether we're waiting for pulse loop to reset before allowing new recordings */
+  uint32_t longest_loop_duration;         /* Duration of the longest currently playing loop */
+  float sync_cutoff_percentage;           /* Cutoff point for sync playback decisions (0.0-1.0, default 0.5) */
+  float sync_recording_cutoff_percentage; /* Cutoff point for sync recording decisions (0.0-1.0, default 0.5) */
+
+  /* Recording backfill buffer for sync mode */
+  float *recording_backfill_buffer;   /* Circular buffer to store recent input audio */
+  uint32_t backfill_buffer_size;      /* Size of backfill buffer (should be >= pulse_loop_duration) */
+  uint32_t backfill_write_position;   /* Current write position in circular buffer */
+  uint32_t backfill_available_frames; /* Number of frames available in backfill buffer */
 };
 
 /* Function declarations */
@@ -188,6 +195,8 @@ void start_sync_pending_recordings_on_pulse_reset(struct data *data);
 void stop_sync_pending_recordings_on_pulse_reset(struct data *data);
 void start_sync_pending_playback_on_pulse_reset(struct data *data);
 void check_sync_recording_target_length(struct data *data, uint8_t midi_note);
+void store_audio_in_backfill_buffer(struct data *data, const float *input, uint32_t n_samples);
+bool start_sync_recording_with_backfill(struct data *data, uint8_t midi_note);
 
 /* Rubberband functions */
 int init_rubberband(struct data *data);

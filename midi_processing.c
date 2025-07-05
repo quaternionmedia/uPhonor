@@ -1,13 +1,14 @@
 #include "midi_processing.h"
 
 #define PERIOD_NSEC (SPA_NSEC_PER_SEC / 8)
-#define SPEED_CC_NUMBER 74         /* MIDI CC 74 for playback speed control */
-#define PITCH_CC_NUMBER 75         /* MIDI CC 75 for pitch shift control */
-#define RECORD_PLAYER_CC_NUMBER 76 /* MIDI CC 76 for record player mode */
-#define VOLUME_CC_NUMBER 7         /* MIDI CC 7 for volume control */
-#define PLAYBACK_MODE_CC_NUMBER 77 /* MIDI CC 77 for playback mode (normal/trigger) */
-#define SYNC_MODE_CC_NUMBER 78     /* MIDI CC 78 for sync mode on/off */
-#define SYNC_CUTOFF_CC_NUMBER 79   /* MIDI CC 79 for sync cutoff point (0-100% of pulse duration) */
+#define SPEED_CC_NUMBER 74                 /* MIDI CC 74 for playback speed control */
+#define PITCH_CC_NUMBER 75                 /* MIDI CC 75 for pitch shift control */
+#define RECORD_PLAYER_CC_NUMBER 76         /* MIDI CC 76 for record player mode */
+#define VOLUME_CC_NUMBER 7                 /* MIDI CC 7 for volume control */
+#define PLAYBACK_MODE_CC_NUMBER 77         /* MIDI CC 77 for playback mode (normal/trigger) */
+#define SYNC_MODE_CC_NUMBER 78             /* MIDI CC 78 for sync mode on/off */
+#define SYNC_CUTOFF_CC_NUMBER 79           /* MIDI CC 79 for sync playback cutoff point (0-100% of pulse duration) */
+#define SYNC_RECORDING_CUTOFF_CC_NUMBER 80 /* MIDI CC 78 for sync recording cutoff point (0-100% of pulse duration) */
 
 void handle_midi_message(struct data *data, uint8_t *midi_data)
 {
@@ -488,7 +489,7 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
 
   case SYNC_CUTOFF_CC_NUMBER:
   {
-    /* Convert MIDI CC value (0-127) to sync cutoff percentage (0.0-1.0) */
+    /* Convert MIDI CC value (0-127) to sync playback cutoff percentage (0.0-1.0) */
     /* CC value 64 = 50% cutoff (default)
      * CC value 0 = 0% cutoff (always sync to current pulse)
      * CC value 127 = 100% cutoff (always wait for next pulse)
@@ -497,8 +498,24 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
 
     data->sync_cutoff_percentage = cutoff_percentage;
 
-    pw_log_info("MIDI CC%d: Sync cutoff set to %.1f%% (value=%d)",
+    pw_log_info("MIDI CC%d: Sync playback cutoff set to %.1f%% (value=%d)",
                 controller, cutoff_percentage * 100.0f, value);
+  }
+  break;
+
+  case SYNC_RECORDING_CUTOFF_CC_NUMBER:
+  {
+    /* Convert MIDI CC value (0-127) to sync recording cutoff percentage (0.0-1.0) */
+    /* CC value 64 = 50% cutoff (default)
+     * CC value 0 = 0% cutoff (always start recording immediately with backfill)
+     * CC value 127 = 100% cutoff (always wait for next pulse)
+     */
+    float recording_cutoff_percentage = (float)(value & 0x7f) / 127.0f;
+
+    data->sync_recording_cutoff_percentage = recording_cutoff_percentage;
+
+    pw_log_info("MIDI CC%d: Sync recording cutoff set to %.1f%% (value=%d)",
+                controller, recording_cutoff_percentage * 100.0f, value);
   }
   break;
 
