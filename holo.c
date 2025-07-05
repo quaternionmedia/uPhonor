@@ -751,6 +751,7 @@ void stop_sync_pending_recordings_on_pulse_reset(struct data *data)
 
       // Set the final duration to be a multiple of pulse duration
       loop->recorded_frames = target_duration;
+      loop->loop_ready = true; // Mark loop as ready for playback
 
       loop->current_state = LOOP_STATE_PLAYING;
       loop->is_playing = true;
