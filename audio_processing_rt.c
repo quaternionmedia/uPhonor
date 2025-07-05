@@ -734,7 +734,7 @@ void reset_memory_loop_playback_rt(struct data *data, uint8_t midi_note)
       // Calculate current pulse position and cutoff point
       uint32_t pulse_position = pulse_loop->playback_position;
       uint32_t cutoff_position = (uint32_t)(data->sync_cutoff_percentage * data->pulse_loop_duration);
-      
+
       // Decide whether to sync to current pulse or wait for next
       if (pulse_position <= cutoff_position)
       {
@@ -749,7 +749,7 @@ void reset_memory_loop_playback_rt(struct data *data, uint8_t midi_note)
           // Pulse position is beyond this loop's length - use modulo
           loop->playback_position = pulse_position % loop->recorded_frames;
         }
-        
+
         return; // Early return - don't reset to 0
       }
       // If after cutoff, fall through to reset to 0 (wait for next pulse)

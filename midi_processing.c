@@ -157,7 +157,7 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
       // Has content and not playing, so start it
       pw_log_info("NORMAL mode: Starting playback for note %d", note);
       loop->current_state = LOOP_STATE_PLAYING;
-      loop->is_playing = true;
+      loop->pending_start = false; // Clear any pending start from previous state
 
       // Calculate synchronized start position in sync mode
       if (data->sync_mode_enabled && data->pulse_loop_note != 255)
@@ -169,11 +169,11 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
           // Calculate current pulse position and cutoff point
           uint32_t pulse_position = pulse_loop->playback_position;
           uint32_t cutoff_position = (uint32_t)(data->sync_cutoff_percentage * data->pulse_loop_duration);
-          
+
           // Decide whether to sync to current pulse or wait for next
           if (pulse_position <= cutoff_position)
           {
-            // Before cutoff - sync to current pulse position
+            // Before cutoff - sync to current pulse position and start playing
             if (pulse_position < loop->recorded_frames)
             {
               // Pulse position fits within this loop - start there
@@ -184,33 +184,39 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
               // Pulse position is beyond this loop's length - use modulo
               loop->playback_position = pulse_position % loop->recorded_frames;
             }
-            
+
+            loop->is_playing = true;
+
             pw_log_info("SYNC mode: Starting loop %d at current pulse position %u (pulse at %u, cutoff at %u)",
                         note, loop->playback_position, pulse_position, cutoff_position);
           }
           else
           {
-            // After cutoff - wait for next pulse cycle (start from beginning)
+            // After cutoff - mark as pending start and wait for next pulse cycle
             loop->playback_position = 0;
-            
-            pw_log_info("SYNC mode: Starting loop %d from beginning - waiting for next pulse cycle (pulse at %u, cutoff at %u)",
+            loop->is_playing = false;
+            loop->pending_start = true;
+
+            pw_log_info("SYNC mode: Loop %d marked as pending start - waiting for next pulse cycle (pulse at %u, cutoff at %u)",
                         note, pulse_position, cutoff_position);
           }
         }
         else
         {
-          // No pulse loop or pulse not playing - start from beginning
+          // No pulse loop or pulse not playing - start immediately
           loop->playback_position = 0;
+          loop->is_playing = true;
           pw_log_info("SYNC mode: No active pulse loop, starting loop %d from beginning", note);
         }
-
-        loop->pending_record = false;
       }
       else
       {
-        // Normal mode or no sync mode - always start from beginning
+        // Not in sync mode - start playing immediately
         loop->playback_position = 0;
+        loop->is_playing = true;
       }
+
+      loop->pending_record = false;
     }
     else
     {
@@ -488,9 +494,9 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
      * CC value 127 = 100% cutoff (always wait for next pulse)
      */
     float cutoff_percentage = (float)(value & 0x7f) / 127.0f;
-    
+
     data->sync_cutoff_percentage = cutoff_percentage;
-    
+
     pw_log_info("MIDI CC%d: Sync cutoff set to %.1f%% (value=%d)",
                 controller, cutoff_percentage * 100.0f, value);
   }
