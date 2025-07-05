@@ -244,20 +244,22 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
               channel, note, velocity, get_playback_mode_name(data),
               is_sync_mode_enabled(data) ? "ON" : "OFF");
 
-  if (data->current_playback_mode == PLAYBACK_MODE_NORMAL)
-  {
-    // NORMAL mode: Note Off messages are ignored
-    pw_log_info("NORMAL mode: Ignoring Note Off for note %d", note);
-    return;
-  }
-
-  // TRIGGER mode: Note Off stops both playback and recording
+  // Get the loop first to check its state
   struct memory_loop *loop = get_loop_by_note(data, note);
   if (!loop)
   {
     pw_log_error("Failed to get loop for note %d", note);
     return;
   }
+
+  if (data->current_playback_mode == PLAYBACK_MODE_NORMAL)
+  {
+    // NORMAL mode: Always ignore Note Off messages - recordings are stopped by 2nd Note On
+    pw_log_info("NORMAL mode: Ignoring Note Off for note %d", note);
+    return;
+  }
+
+  // TRIGGER mode: Note Off stops both playback and recording
 
   if (loop->current_state == LOOP_STATE_PLAYING)
   {
@@ -267,13 +269,105 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
   }
   else if (loop->current_state == LOOP_STATE_RECORDING)
   {
-    // Handle sync mode differently - don't stop immediately
+    // Handle sync mode differently - check recording cutoff
     if (is_sync_mode_enabled(data))
     {
-      // In sync mode, mark for stopping at next pulse reset instead of stopping immediately
-      loop->pending_stop = true;
-      pw_log_info("SYNC mode: Marking recording for note %d to stop at next pulse reset", note);
-      return; // Don't stop immediately
+      // Get the pulse loop to check current position
+      struct memory_loop *pulse_loop = get_loop_by_note(data, data->pulse_loop_note);
+      if (pulse_loop && pulse_loop->is_playing && data->pulse_loop_duration > 0)
+      {
+        // Calculate current pulse position and recording cutoff point
+        uint32_t pulse_position = pulse_loop->playback_position;
+        uint32_t recording_cutoff_position = (uint32_t)(data->sync_recording_cutoff_percentage * data->pulse_loop_duration);
+
+        // Decide whether to stop at current pulse position or wait for next pulse reset
+        if (pulse_position <= recording_cutoff_position)
+        {
+          // Before cutoff - stop immediately and align to pulse boundary
+          pw_log_info("SYNC mode: Stopping recording for note %d immediately (pulse at %u, cutoff at %u)",
+                      note, pulse_position, recording_cutoff_position);
+
+          // Stop the recording immediately
+          stop_loop_recording_rt(data, note);
+          usleep(1000); // 1ms
+
+          // Calculate target duration to be a multiple of pulse duration
+          uint32_t target_duration = loop->recorded_frames;
+          if (data->pulse_loop_duration > 0)
+          {
+            // Calculate how many complete pulse cycles we have recorded
+            uint32_t multiple = loop->recorded_frames / data->pulse_loop_duration;
+            uint32_t remainder = loop->recorded_frames % data->pulse_loop_duration;
+
+            // If we have recorded less than one pulse, extend to one pulse
+            if (multiple == 0)
+            {
+              multiple = 1;
+              target_duration = multiple * data->pulse_loop_duration;
+            }
+            else if (remainder == 0)
+            {
+              // Exact multiple - keep current length
+              target_duration = loop->recorded_frames;
+            }
+            else
+            {
+              // Partial pulse recorded - decide whether to round up or down
+              // If we've recorded more than half of the next pulse, round up
+              if (remainder > data->pulse_loop_duration / 2)
+              {
+                target_duration = (multiple + 1) * data->pulse_loop_duration;
+              }
+              else
+              {
+                // Round down to last complete pulse
+                target_duration = multiple * data->pulse_loop_duration;
+              }
+            }
+          }
+
+          // Set the aligned duration and start playback in sync
+          loop->recorded_frames = target_duration;
+          loop->current_state = LOOP_STATE_PLAYING;
+          
+          // Start playing in sync with current pulse position
+          if (pulse_position < loop->recorded_frames)
+          {
+            loop->playback_position = pulse_position;
+          }
+          else
+          {
+            loop->playback_position = pulse_position % loop->recorded_frames;
+          }
+          
+          loop->is_playing = true;
+          loop->pending_stop = false;
+
+          if (data->currently_recording_note == note)
+          {
+            data->currently_recording_note = 255;
+          }
+
+          pw_log_info("SYNC mode: Recording for note %d stopped at %u frames, playing in sync at position %u",
+                      note, target_duration, loop->playback_position);
+          return;
+        }
+        else
+        {
+          // After cutoff - mark for stopping at next pulse reset
+          loop->pending_stop = true;
+          pw_log_info("SYNC mode: Marking recording for note %d to stop at next pulse reset (pulse at %u, cutoff at %u)",
+                      note, pulse_position, recording_cutoff_position);
+          return; // Don't stop immediately
+        }
+      }
+      else
+      {
+        // No pulse loop or pulse not playing - mark for stopping at next pulse reset
+        loop->pending_stop = true;
+        pw_log_info("SYNC mode: No active pulse loop, marking recording for note %d to stop at next pulse reset", note);
+        return; // Don't stop immediately
+      }
     }
 
     pw_log_info("TRIGGER mode: Stopping recording for note %d", note);

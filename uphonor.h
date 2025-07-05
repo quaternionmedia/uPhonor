@@ -159,6 +159,7 @@ void on_process(void *userdata, struct spa_io_position *position);
 
 /* Include modular headers */
 #include "audio_processing.h"
+#include "audio_processing_rt.h"
 #include "midi_processing.h"
 #include "buffer_manager.h"
 
