@@ -81,6 +81,11 @@ void handle_audio_input_rt(struct data *data, uint32_t n_samples)
           loop_full_counter = 0;
         }
       }
+      else
+      {
+        /* Check if sync recording should stop due to reaching target length */
+        check_sync_recording_target_length(data, data->currently_recording_note);
+      }
     }
   }
 }

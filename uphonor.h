@@ -187,6 +187,7 @@ void check_sync_pending_recordings(struct data *data);
 void start_sync_pending_recordings_on_pulse_reset(struct data *data);
 void stop_sync_pending_recordings_on_pulse_reset(struct data *data);
 void start_sync_pending_playback_on_pulse_reset(struct data *data);
+void check_sync_recording_target_length(struct data *data, uint8_t midi_note);
 
 /* Rubberband functions */
 int init_rubberband(struct data *data);

@@ -671,12 +671,32 @@ void stop_sync_pending_recordings_on_pulse_reset(struct data *data)
       uint32_t target_duration = loop->recorded_frames;
       if (data->pulse_loop_duration > 0)
       {
-        // Round up to next multiple of pulse duration
-        uint32_t multiple = (loop->recorded_frames + data->pulse_loop_duration - 1) / data->pulse_loop_duration;
+        // Calculate how many complete pulse cycles we have recorded
+        uint32_t multiple = loop->recorded_frames / data->pulse_loop_duration;
+        uint32_t remainder = loop->recorded_frames % data->pulse_loop_duration;
+
+        // If we have recorded less than one pulse, extend to one pulse
         if (multiple == 0)
+        {
           multiple = 1;
-        target_duration = multiple * data->pulse_loop_duration;
-        pw_log_info("SYNC mode: Extending recording to %u frames (%ux pulse loop)", target_duration, multiple);
+          target_duration = multiple * data->pulse_loop_duration;
+          pw_log_info("SYNC mode: Extending short recording to %u frames (%ux pulse loop), was %u frames",
+                      target_duration, multiple, loop->recorded_frames);
+        }
+        else if (remainder == 0)
+        {
+          // Exact multiple - keep current length
+          target_duration = loop->recorded_frames;
+          pw_log_info("SYNC mode: Recording is exact multiple - keeping %u frames (%ux pulse loop)",
+                      target_duration, multiple);
+        }
+        else
+        {
+          // Partial pulse recorded - truncate to last complete pulse
+          target_duration = multiple * data->pulse_loop_duration;
+          pw_log_info("SYNC mode: Truncating to last complete pulse: %u frames (%ux pulse loop), was %u frames",
+                      target_duration, multiple, loop->recorded_frames);
+        }
       }
 
       // Stop the recording
@@ -731,5 +751,46 @@ void start_sync_pending_playback_on_pulse_reset(struct data *data)
       pw_log_debug("SYNC pulse reset: Note %d pending start but state=%d or loop_ready=%s",
                    i, loop->current_state, loop->loop_ready ? "true" : "false");
     }
+  }
+}
+
+/* Check if a recording should stop due to reaching target sync length */
+void check_sync_recording_target_length(struct data *data, uint8_t midi_note)
+{
+  if (!data->sync_mode_enabled || data->pulse_loop_duration == 0)
+    return;
+
+  struct memory_loop *loop = &data->memory_loops[midi_note];
+  if (!loop || loop->current_state != LOOP_STATE_RECORDING || !loop->pending_stop)
+    return;
+
+  // Calculate what multiple of pulse duration we want based on current length
+  uint32_t current_multiple = (loop->recorded_frames + data->pulse_loop_duration - 1) / data->pulse_loop_duration;
+  uint32_t target_frames = current_multiple * data->pulse_loop_duration;
+
+  // Check if we've reached or exceeded the target length
+  if (loop->recorded_frames >= target_frames)
+  {
+    pw_log_info("SYNC: Recording for note %d reached target length %u frames (%ux pulse), stopping",
+                midi_note, target_frames, current_multiple);
+
+    // Stop the recording immediately
+    stop_loop_recording_rt(data, midi_note);
+    usleep(1000); // 1ms
+
+    // Set the exact target duration
+    loop->recorded_frames = target_frames;
+    loop->current_state = LOOP_STATE_PLAYING;
+    loop->is_playing = true;
+    loop->pending_stop = false;
+
+    // Clear the currently recording note
+    if (data->currently_recording_note == midi_note)
+    {
+      data->currently_recording_note = 255;
+    }
+
+    pw_log_info("SYNC: Recording for note %d completed at %u frames, now playing",
+                midi_note, target_frames);
   }
 }
