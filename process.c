@@ -8,6 +8,12 @@ void on_process(void *userdata, struct spa_io_position *position)
   struct data *data = userdata;
   uint32_t n_samples = position->clock.duration;
 
+  // Update pulse timeline for sync mode
+  if (data->sync_mode_enabled && data->pulse_loop_duration > 0)
+  {
+    update_pulse_timeline(data, position->clock.position);
+  }
+
   // Process MIDI input and output (always needed for control)
   process_midi_input(data, position);
 

@@ -10,6 +10,33 @@
 #define SYNC_CUTOFF_CC_NUMBER 79           /* MIDI CC 79 for sync playback cutoff point (0-100% of pulse duration) */
 #define SYNC_RECORDING_CUTOFF_CC_NUMBER 80 /* MIDI CC 78 for sync recording cutoff point (0-100% of pulse duration) */
 
+/* Update the pulse timeline based on current sample frame */
+void update_pulse_timeline(struct data *data, uint64_t current_frame)
+{
+  data->current_sample_frame = current_frame;
+}
+
+/* Get the theoretical pulse position based on timeline, even when no loops are playing */
+uint32_t get_theoretical_pulse_position(struct data *data)
+{
+  if (data->pulse_loop_duration == 0)
+  {
+    return 0;
+  }
+
+  // If pulse timeline hasn't been started yet, start it now
+  if (data->pulse_timeline_start_frame == 0)
+  {
+    data->pulse_timeline_start_frame = data->current_sample_frame;
+  }
+
+  // Calculate how many frames have elapsed since pulse timeline started
+  uint64_t elapsed_frames = data->current_sample_frame - data->pulse_timeline_start_frame;
+  
+  // Return the position within the current pulse cycle
+  return (uint32_t)(elapsed_frames % data->pulse_loop_duration);
+}
+
 void handle_midi_message(struct data *data, uint8_t *midi_data)
 {
   uint8_t message_type = *midi_data & 0xf0;
@@ -262,8 +289,10 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
       {
         data->pulse_loop_duration = loop->recorded_frames;
         data->pulse_loop_note = note;
-        pw_log_info("SYNC mode: Setting pulse loop duration to %u frames from note %d",
-                    data->pulse_loop_duration, note);
+        // Initialize pulse timeline
+        data->pulse_timeline_start_frame = data->current_sample_frame;
+        pw_log_info("SYNC mode: Setting pulse loop duration to %u frames from note %d, starting timeline at frame %lu",
+                    data->pulse_loop_duration, note, data->pulse_timeline_start_frame);
       }
 
       // Apply pulse duration alignment in sync mode even without active pulse loop
@@ -352,35 +381,48 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
       loop->pending_start = false; // Clear any pending start from previous state
 
       // Calculate synchronized start position in sync mode
-      if (data->sync_mode_enabled && data->pulse_loop_note != 255)
+      if (data->sync_mode_enabled && data->pulse_loop_duration > 0)
       {
-        // Get the pulse loop to sync with
-        struct memory_loop *pulse_loop = get_loop_by_note(data, data->pulse_loop_note);
-        if (pulse_loop && pulse_loop->is_playing && data->pulse_loop_duration > 0)
+        uint32_t reference_position = 0;
+        bool found_reference = false;
+
+        // Always use the theoretical pulse position - this continues advancing even when no loops are playing
+        reference_position = get_theoretical_pulse_position(data);
+        found_reference = true;
+        
+        if (note == data->pulse_loop_note)
         {
-          // Calculate current pulse position and cutoff point
-          uint32_t pulse_position = pulse_loop->playback_position;
+          pw_log_info("SYNC mode: Pulse loop %d syncing to theoretical position %u", note, reference_position);
+        }
+        else
+        {
+          pw_log_info("SYNC mode: Loop %d syncing to theoretical pulse position %u", note, reference_position);
+        }
+
+        if (found_reference)
+        {
+          // Calculate cutoff point for timing decision
           uint32_t cutoff_position = (uint32_t)(data->sync_cutoff_percentage * data->pulse_loop_duration);
 
-          // Decide whether to sync to current pulse or wait for next
-          if (pulse_position <= cutoff_position)
+          // Decide whether to sync to current position or wait for next cycle
+          if (reference_position <= cutoff_position)
           {
-            // Before cutoff - sync to current pulse position and start playing
-            if (pulse_position < loop->recorded_frames)
+            // Before cutoff - sync to current position and start playing
+            if (reference_position < loop->recorded_frames)
             {
-              // Pulse position fits within this loop - start there
-              loop->playback_position = pulse_position;
+              // Reference position fits within this loop - start there
+              loop->playback_position = reference_position;
             }
             else
             {
-              // Pulse position is beyond this loop's length - use modulo
-              loop->playback_position = pulse_position % loop->recorded_frames;
+              // Reference position is beyond this loop's length - use modulo
+              loop->playback_position = reference_position % loop->recorded_frames;
             }
 
             loop->is_playing = true;
 
-            pw_log_info("SYNC mode: Starting loop %d at current pulse position %u (pulse at %u, cutoff at %u)",
-                        note, loop->playback_position, pulse_position, cutoff_position);
+            pw_log_info("SYNC mode: Starting loop %d at synchronized position %u (reference at %u, cutoff at %u)",
+                        note, loop->playback_position, reference_position, cutoff_position);
           }
           else
           {
@@ -389,21 +431,21 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
             loop->is_playing = false;
             loop->pending_start = true;
 
-            pw_log_info("SYNC mode: Loop %d marked as pending start - waiting for next pulse cycle (pulse at %u, cutoff at %u)",
-                        note, pulse_position, cutoff_position);
+            pw_log_info("SYNC mode: Loop %d marked as pending start - waiting for next pulse cycle (reference at %u, cutoff at %u)",
+                        note, reference_position, cutoff_position);
           }
         }
         else
         {
-          // No pulse loop or pulse not playing - start immediately
+          // No reference loop found - start immediately from beginning
           loop->playback_position = 0;
           loop->is_playing = true;
-          pw_log_info("SYNC mode: No active pulse loop, starting loop %d from beginning", note);
+          pw_log_info("SYNC mode: No reference loop found, starting loop %d from beginning", note);
         }
       }
       else
       {
-        // Not in sync mode - start playing immediately
+        // Not in sync mode or no pulse duration set - start playing immediately
         loop->playback_position = 0;
         loop->is_playing = true;
       }
@@ -584,6 +626,11 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
       {
         data->pulse_loop_duration = loop->recorded_frames;
         data->waiting_for_pulse_reset = true; // Prevent new recordings until reset
+        // Update pulse timeline if it wasn't initialized yet
+        if (data->pulse_timeline_start_frame == 0)
+        {
+          data->pulse_timeline_start_frame = data->current_sample_frame;
+        }
         pw_log_info("SYNC mode: Pulse loop recorded with %u frames", data->pulse_loop_duration);
       }
       else

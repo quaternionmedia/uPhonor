@@ -147,6 +147,10 @@ struct data
   float sync_cutoff_percentage;           /* Cutoff point for sync playback decisions (0.0-1.0, default 0.5) */
   float sync_recording_cutoff_percentage; /* Cutoff point for sync recording decisions (0.0-1.0, default 0.5) */
 
+  /* Pulse timeline tracking */
+  uint64_t pulse_timeline_start_frame;    /* Frame when pulse timeline started */
+  uint64_t current_sample_frame;          /* Current sample frame position */
+
   /* Recording backfill buffer for sync mode */
   float *recording_backfill_buffer;   /* Circular buffer to store recent input audio */
   uint32_t backfill_buffer_size;      /* Size of backfill buffer (should be >= pulse_loop_duration) */

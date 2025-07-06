@@ -1,0 +1,166 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE CARLA-PROJECT>
+<CARLA-PROJECT VERSION='2.5'>
+ <EngineSettings>
+  <ForceStereo>false</ForceStereo>
+  <PreferPluginBridges>false</PreferPluginBridges>
+  <PreferUiBridges>true</PreferUiBridges>
+  <UIsAlwaysOnTop>false</UIsAlwaysOnTop>
+  <MaxParameters>200</MaxParameters>
+  <UIBridgesTimeout>4000</UIBridgesTimeout>
+ </EngineSettings>
+
+ <Transport>
+  <BeatsPerMinute>120</BeatsPerMinute>
+ </Transport>
+
+ <!-- MIDI Channel A/B -->
+ <Plugin>
+  <Info>
+   <Type>INTERNAL</Type>
+   <Name>MIDI Channel A.B</Name>
+   <Label>midichanab</Label>
+  </Info>
+
+  <Data>
+   <Active>Yes</Active>
+   <ControlChannel>1</ControlChannel>
+   <Options>0x3f0</Options>
+
+   <Parameter>
+    <Index>0</Index>
+    <Name>1</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>1</Index>
+    <Name>2</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>2</Index>
+    <Name>3</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>3</Index>
+    <Name>4</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>4</Index>
+    <Name>5</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>5</Index>
+    <Name>6</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>6</Index>
+    <Name>7</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>7</Index>
+    <Name>8</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>8</Index>
+    <Name>9</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>9</Index>
+    <Name>10</Name>
+    <Value>1</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>10</Index>
+    <Name>11</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>11</Index>
+    <Name>12</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>12</Index>
+    <Name>13</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>13</Index>
+    <Name>14</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>14</Index>
+    <Name>15</Name>
+    <Value>0</Value>
+   </Parameter>
+
+   <Parameter>
+    <Index>15</Index>
+    <Name>16</Name>
+    <Value>0</Value>
+   </Parameter>
+  </Data>
+ </Plugin>
+
+ <ExternalPatchbay>
+  <Connection>
+   <Source>qsynth:left</Source>
+   <Target>Built-in Audio Analog Stereo:playback_FL</Target>
+  </Connection>
+  <Connection>
+   <Source>qsynth:left</Source>
+   <Target>Micro-phonor Loop manager:audio_input</Target>
+  </Connection>
+  <Connection>
+   <Source>qsynth:right</Source>
+   <Target>Built-in Audio Analog Stereo:playback_FR</Target>
+  </Connection>
+  <Connection>
+   <Source>Micro-phonor Loop manager:audio_output</Source>
+   <Target>Built-in Audio Analog Stereo:playback_FL</Target>
+  </Connection>
+  <Connection>
+   <Source>Micro-phonor Loop manager:audio_output</Source>
+   <Target>Built-in Audio Analog Stereo:playback_FR</Target>
+  </Connection>
+  <Connection>
+   <Source>a2j:Digital Piano [24] (capture): [0] Digital Piano MIDI 1</Source>
+   <Target>qsynth:midi_00</Target>
+  </Connection>
+  <Connection>
+   <Source>a2j:Launchpad X [28] (capture): [1] Launchpad X LPX MIDI In</Source>
+   <Target>Carla:MIDI Channel A.B:events-in</Target>
+  </Connection>
+  <Connection>
+   <Source>Carla:MIDI Channel A.B:midi-out_1</Source>
+   <Target>Micro-phonor Loop manager:midi_input</Target>
+  </Connection>
+  <Connection>
+   <Source>Carla:MIDI Channel A.B:midi-out_2</Source>
+   <Target>qsynth:midi_00</Target>
+  </Connection>
+ </ExternalPatchbay>
+</CARLA-PROJECT>
