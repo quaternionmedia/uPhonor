@@ -3,13 +3,17 @@
 
 int init_rubberband(struct data *data)
 {
+  pw_log_info("DEBUG: init_rubberband called");
+
   if (!data)
   {
+    pw_log_error("DEBUG: init_rubberband failed - data is NULL");
     return -1;
   }
 
   /* Get sample rate from format info */
   uint32_t sample_rate = data->format.info.raw.rate > 0 ? data->format.info.raw.rate : 48000;
+  pw_log_info("DEBUG: Using sample rate %d for rubberband init", sample_rate);
 
   /* Create rubberband state for realtime processing with ultra-low latency and maximum responsiveness */
   data->rubberband_state = rubberband_new(
@@ -31,8 +35,11 @@ int init_rubberband(struct data *data)
 
   if (!data->rubberband_state)
   {
+    pw_log_error("DEBUG: rubberband_new failed - returned NULL");
     return -1;
   }
+
+  pw_log_info("DEBUG: rubberband_new succeeded, state=%p", data->rubberband_state);
 
   /* Set maximum process size to very small chunks for immediate responsiveness */
   rubberband_set_max_process_size(data->rubberband_state, 256);

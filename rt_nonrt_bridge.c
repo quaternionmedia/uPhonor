@@ -306,6 +306,46 @@ void *nonrt_worker_thread(void *arg)
         fprintf(stderr, "RT Error: %s\n", msg.data.error.message);
         break;
 
+      case RT_MSG_WRITE_LOOP_TO_FILE:
+        /* Write completed memory loop to file */
+        if (msg.data.loop_write.audio_data && msg.data.loop_write.num_frames > 0)
+        {
+          SF_INFO loop_fileinfo = {0};
+          loop_fileinfo.samplerate = msg.data.loop_write.sample_rate;
+          loop_fileinfo.channels = 1; /* Memory loops are mono */
+          loop_fileinfo.format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
+
+          char loop_filepath[512];
+          snprintf(loop_filepath, sizeof(loop_filepath),
+                   "recordings/%s", msg.data.loop_write.filename);
+
+          SNDFILE *loop_file = sf_open(loop_filepath, SFM_WRITE, &loop_fileinfo);
+          if (loop_file)
+          {
+            sf_count_t written = sf_writef_float(loop_file,
+                                                 msg.data.loop_write.audio_data,
+                                                 msg.data.loop_write.num_frames);
+            sf_close(loop_file);
+
+            if (written == msg.data.loop_write.num_frames)
+            {
+              printf("Saved memory loop to: %s (%u frames)\n",
+                     loop_filepath, msg.data.loop_write.num_frames);
+            }
+            else
+            {
+              fprintf(stderr, "Warning: Only wrote %ld of %u frames to %s\n",
+                      written, msg.data.loop_write.num_frames, loop_filepath);
+            }
+          }
+          else
+          {
+            fprintf(stderr, "Could not open loop file for writing: %s - %s\n",
+                    loop_filepath, sf_strerror(NULL));
+          }
+        }
+        break;
+
       case RT_MSG_QUIT:
         worker->running = false;
         break;
