@@ -150,6 +150,7 @@ struct data
   /* Pulse timeline tracking */
   uint64_t pulse_timeline_start_frame;    /* Frame when pulse timeline started */
   uint64_t current_sample_frame;          /* Current sample frame position */
+  uint32_t previous_pulse_position;       /* Previous theoretical pulse position for reset detection */
 
   /* Recording backfill buffer for sync mode */
   float *recording_backfill_buffer;   /* Circular buffer to store recent input audio */

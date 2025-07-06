@@ -16,6 +16,40 @@ void update_pulse_timeline(struct data *data, uint64_t current_frame)
   data->current_sample_frame = current_frame;
 }
 
+/* Check for theoretical pulse reset and trigger pending actions */
+void check_theoretical_pulse_reset(struct data *data)
+{
+  if (!data->sync_mode_enabled || data->pulse_loop_duration == 0)
+  {
+    return;
+  }
+
+  uint32_t current_pulse_position = get_theoretical_pulse_position(data);
+  
+  // Detect pulse reset: current position is smaller than previous position
+  // This happens when the modulo operation wraps around from pulse_loop_duration-1 to 0
+  if (current_pulse_position < data->previous_pulse_position)
+  {
+    pw_log_info("Theoretical pulse reset detected: position %u -> %u", 
+                data->previous_pulse_position, current_pulse_position);
+    
+    // Clear waiting for pulse reset
+    data->waiting_for_pulse_reset = false;
+    
+    // Handle pending stops first (recordings that should end at pulse boundary)
+    stop_sync_pending_recordings_on_pulse_reset(data);
+    
+    // Then start any pending recordings  
+    start_sync_pending_recordings_on_pulse_reset(data);
+    
+    // Finally start any pending playback
+    start_sync_pending_playback_on_pulse_reset(data);
+  }
+  
+  // Update previous position for next check
+  data->previous_pulse_position = current_pulse_position;
+}
+
 /* Get the theoretical pulse position based on timeline, even when no loops are playing */
 uint32_t get_theoretical_pulse_position(struct data *data)
 {
@@ -28,6 +62,7 @@ uint32_t get_theoretical_pulse_position(struct data *data)
   if (data->pulse_timeline_start_frame == 0)
   {
     data->pulse_timeline_start_frame = data->current_sample_frame;
+    data->previous_pulse_position = 0;
   }
 
   // Calculate how many frames have elapsed since pulse timeline started
@@ -291,6 +326,7 @@ void handle_note_on(struct data *data, uint8_t channel, uint8_t note, uint8_t ve
         data->pulse_loop_note = note;
         // Initialize pulse timeline
         data->pulse_timeline_start_frame = data->current_sample_frame;
+        data->previous_pulse_position = 0;
         pw_log_info("SYNC mode: Setting pulse loop duration to %u frames from note %d, starting timeline at frame %lu",
                     data->pulse_loop_duration, note, data->pulse_timeline_start_frame);
       }
@@ -630,6 +666,7 @@ void handle_note_off(struct data *data, uint8_t channel, uint8_t note, uint8_t v
         if (data->pulse_timeline_start_frame == 0)
         {
           data->pulse_timeline_start_frame = data->current_sample_frame;
+          data->previous_pulse_position = 0;
         }
         pw_log_info("SYNC mode: Pulse loop recorded with %u frames", data->pulse_loop_duration);
       }

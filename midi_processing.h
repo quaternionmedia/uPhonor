@@ -14,6 +14,7 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
 /* Pulse timeline functions */
 uint32_t get_theoretical_pulse_position(struct data *data);
 void update_pulse_timeline(struct data *data, uint64_t current_frame);
+void check_theoretical_pulse_reset(struct data *data);
 
 /* MIDI utility functions */
 void parse_midi_sequence(struct data *data, struct spa_pod_sequence *seq);

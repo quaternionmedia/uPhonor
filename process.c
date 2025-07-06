@@ -12,6 +12,7 @@ void on_process(void *userdata, struct spa_io_position *position)
   if (data->sync_mode_enabled && data->pulse_loop_duration > 0)
   {
     update_pulse_timeline(data, position->clock.position);
+    check_theoretical_pulse_reset(data);
   }
 
   // Process MIDI input and output (always needed for control)
