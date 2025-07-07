@@ -29,7 +29,6 @@ int main(int argc, char *argv[])
   data.playback_speed = 1.0f; // Default normal speed
   data.sample_position = 0.0; // Initialize fractional sample position
 
-  data.current_state = HOLO_STATE_IDLE;
   // Initialize performance buffers (add after data initialization)
   data.max_buffer_size = 2048 * 8; // Support up to 8 channels at 2048 samples
   data.silence_buffer = calloc(data.max_buffer_size, sizeof(float));
@@ -57,10 +56,10 @@ int main(int argc, char *argv[])
     return -1;
   }
 
-  // Initialize memory loop system (60 seconds max loop at 48kHz)
-  if (init_memory_loop(&data, 60, 48000) < 0)
+  // Initialize multi-loop memory system (60 seconds max loop at 48kHz for each of 128 MIDI notes)
+  if (init_all_memory_loops(&data, 60, 48000) < 0)
   {
-    fprintf(stderr, "Failed to initialize memory loop system\n");
+    fprintf(stderr, "Failed to initialize multi-loop memory system\n");
     audio_buffer_rt_cleanup(&data.audio_buffer);
     rt_nonrt_bridge_destroy(&data.rt_bridge);
     free(data.silence_buffer);
@@ -246,8 +245,8 @@ int main(int argc, char *argv[])
   // Cleanup audio buffer system
   audio_buffer_rt_cleanup(&data.audio_buffer);
 
-  // Cleanup memory loop system
-  cleanup_memory_loop(&data);
+  // Cleanup multi-loop memory system
+  cleanup_all_memory_loops(&data);
 
   // Free performance buffers
   free(data.silence_buffer);

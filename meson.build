@@ -25,6 +25,8 @@ uphonor_sources = [
   'record.c',
   'rubberband_processing.c',
   'utils.c',
+  'multi_loop_functions.c',
+  'holo.c',
 ]
 
 # exes
