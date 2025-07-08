@@ -15,7 +15,7 @@ jobs:
         uses: quaternionmedia/milestones@v1.0.0
 
       - name: 📲 Install dependencies
-        run: sudo apt-get install -y build-essential meson libsndfile-dev libasound2-dev libdbus-1-dev libgtk2.0-dev
+        run: sudo apt-get install -y build-essential meson libsndfile-dev libasound2-dev libdbus-1-dev libgtk2.0-dev librubberband-dev
 
       - name: 🚰 Install pipewire
         run: |
