@@ -1,0 +1,22 @@
+<!DOCTYPE patchbay>
+<patchbay version="0.6.1" name="uphonor">
+ <items>
+  <item node-type="pipewire" port-type="pipewire-audio">
+   <output node="Micro-phonor Loop manager" port="uPhonor:audio_output"/>
+   <input node="Built-in Audio Analog Stereo" port="CS4206 Analog:playback_FR"/>
+  </item>
+  <item node-type="pipewire" port-type="pipewire-midi">
+   <output node="a2j" port="a2j:Launchpad X [24] (capture): [1] Launchpad X LPX MIDI In"/>
+   <input node="Micro-phonor Loop manager" port="uPhonor:midi_input"/>
+  </item>
+  <item node-type="pipewire" port-type="pipewire-audio">
+   <output node="Micro-phonor Loop manager" port="uPhonor:audio_output"/>
+   <input node="Built-in Audio Analog Stereo" port="CS4206 Analog:playback_FL"/>
+  </item>
+  <item node-type="pipewire" port-type="pipewire-audio">
+   <output node="C922 Pro Stream Webcam Analog Stereo" port="C922 Pro Stream Webcam:capture_FR"/>
+   <input node="Micro-phonor Loop manager" port="uPhonor:audio_input"/>
+  </item>
+ </items>
+</patchbay>
+

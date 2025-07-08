@@ -109,6 +109,9 @@ struct data
     bool loop_ready;            /* Whether loop is ready for playback */
     bool recording_to_memory;   /* Whether we're currently recording to memory */
     bool is_playing;            /* Whether this loop is currently playing */
+    bool pending_record;        /* Whether this loop is waiting to start recording in sync mode */
+    bool pending_stop;          /* Whether this loop is waiting to stop recording at next pulse reset in sync mode */
+    bool pending_start;         /* Whether this loop is waiting to start playing at next pulse reset in sync mode */
     uint32_t sample_rate;       /* Sample rate for the recorded loop */
     char loop_filename[512];    /* Filename for eventual file write */
     uint8_t midi_note;          /* MIDI note number (0-127) that controls this loop */
@@ -134,6 +137,26 @@ struct data
     PLAYBACK_MODE_NORMAL, /* Note On toggles play/stop, Note Off ignored */
     PLAYBACK_MODE_TRIGGER /* Note On starts, Note Off stops (current behavior) */
   } current_playback_mode;
+
+  /* Sync mode control (independent of playback mode) */
+  bool sync_mode_enabled;                 /* Whether sync mode is active */
+  uint8_t pulse_loop_note;                /* MIDI note of the pulse/master loop (255 if none) */
+  uint32_t pulse_loop_duration;           /* Duration in frames of the pulse loop */
+  bool waiting_for_pulse_reset;           /* Whether we're waiting for pulse loop to reset before allowing new recordings */
+  uint32_t longest_loop_duration;         /* Duration of the longest currently playing loop */
+  float sync_cutoff_percentage;           /* Cutoff point for sync playback decisions (0.0-1.0, default 0.5) */
+  float sync_recording_cutoff_percentage; /* Cutoff point for sync recording decisions (0.0-1.0, default 0.5) */
+
+  /* Pulse timeline tracking */
+  uint64_t pulse_timeline_start_frame; /* Frame when pulse timeline started */
+  uint64_t current_sample_frame;       /* Current sample frame position */
+  uint32_t previous_pulse_position;    /* Previous theoretical pulse position for reset detection */
+
+  /* Recording backfill buffer for sync mode */
+  float *recording_backfill_buffer;   /* Circular buffer to store recent input audio */
+  uint32_t backfill_buffer_size;      /* Size of backfill buffer (should be >= pulse_loop_duration) */
+  uint32_t backfill_write_position;   /* Current write position in circular buffer */
+  uint32_t backfill_available_frames; /* Number of frames available in backfill buffer */
 };
 
 /* Function declarations */
@@ -141,6 +164,7 @@ void on_process(void *userdata, struct spa_io_position *position);
 
 /* Include modular headers */
 #include "audio_processing.h"
+#include "audio_processing_rt.h"
 #include "midi_processing.h"
 #include "buffer_manager.h"
 
@@ -166,6 +190,19 @@ void set_playback_mode_normal(struct data *data);
 void set_playback_mode_trigger(struct data *data);
 void toggle_playback_mode(struct data *data);
 const char *get_playback_mode_name(struct data *data);
+
+/* Sync mode functions */
+void enable_sync_mode(struct data *data);
+void disable_sync_mode(struct data *data);
+void toggle_sync_mode(struct data *data);
+bool is_sync_mode_enabled(struct data *data);
+void check_sync_pending_recordings(struct data *data);
+void start_sync_pending_recordings_on_pulse_reset(struct data *data);
+void stop_sync_pending_recordings_on_pulse_reset(struct data *data);
+void start_sync_pending_playback_on_pulse_reset(struct data *data);
+void check_sync_recording_target_length(struct data *data, uint8_t midi_note);
+void store_audio_in_backfill_buffer(struct data *data, const float *input, uint32_t n_samples);
+bool start_sync_recording_with_backfill(struct data *data, uint8_t midi_note);
 
 /* Rubberband functions */
 int init_rubberband(struct data *data);

@@ -60,6 +60,12 @@ void handle_audio_input_rt(struct data *data, uint32_t n_samples)
     }
   }
 
+  /* Always store audio in backfill buffer for potential sync recording (RT-safe) */
+  if (data->sync_mode_enabled && data->recording_backfill_buffer)
+  {
+    store_audio_in_backfill_buffer(data, in, n_samples);
+  }
+
   /* Store audio in memory loop if any loop recording is active (RT-safe) */
   if (data->currently_recording_note < 128)
   {
@@ -80,6 +86,11 @@ void handle_audio_input_rt(struct data *data, uint32_t n_samples)
           rt_bridge_send_message(&data->rt_bridge, &msg);
           loop_full_counter = 0;
         }
+      }
+      else
+      {
+        /* Check if sync recording should stop due to reaching target length */
+        check_sync_recording_target_length(data, data->currently_recording_note);
       }
     }
   }
@@ -129,12 +140,16 @@ void process_audio_output_rt(struct data *data, struct spa_io_position *position
   /* Handle audio reset (RT-safe file operations) */
   if (data->reset_audio)
   {
-    /* Reset all active memory loops */
-    for (int i = 0; i < 128; i++)
+    /* In sync mode, don't reset all loops - they should maintain their positions */
+    if (!data->sync_mode_enabled)
     {
-      if (data->memory_loops[i].loop_ready)
+      /* Reset all active memory loops */
+      for (int i = 0; i < 128; i++)
       {
-        reset_memory_loop_playback_rt(data, i);
+        if (data->memory_loops[i].loop_ready)
+        {
+          reset_memory_loop_playback_rt(data, i);
+        }
       }
     }
 
@@ -718,6 +733,41 @@ void reset_memory_loop_playback_rt(struct data *data, uint8_t midi_note)
   if (!data || midi_note >= 128)
     return;
 
+  struct memory_loop *loop = &data->memory_loops[midi_note];
+
+  // Calculate synchronized start position in sync mode
+  if (data->sync_mode_enabled && data->pulse_loop_note != 255 && midi_note != data->pulse_loop_note)
+  {
+    // Get the pulse loop to sync with
+    struct memory_loop *pulse_loop = &data->memory_loops[data->pulse_loop_note];
+    if (pulse_loop->is_playing && data->pulse_loop_duration > 0 && loop->recorded_frames > 0)
+    {
+      // Calculate current pulse position and cutoff point
+      uint32_t pulse_position = pulse_loop->playback_position;
+      uint32_t cutoff_position = (uint32_t)(data->sync_cutoff_percentage * data->pulse_loop_duration);
+
+      // Decide whether to sync to current pulse or wait for next
+      if (pulse_position <= cutoff_position)
+      {
+        // Before cutoff - sync to current pulse position
+        if (pulse_position < loop->recorded_frames)
+        {
+          // Pulse position fits within this loop - start there
+          loop->playback_position = pulse_position;
+        }
+        else
+        {
+          // Pulse position is beyond this loop's length - use modulo
+          loop->playback_position = pulse_position % loop->recorded_frames;
+        }
+
+        return; // Early return - don't reset to 0
+      }
+      // If after cutoff, fall through to reset to 0 (wait for next pulse)
+    }
+  }
+
+  // Default behavior - reset to beginning
   data->memory_loops[midi_note].playback_position = 0;
 }
 
