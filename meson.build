@@ -11,6 +11,7 @@ sndfile = dependency('sndfile')
 alsa = dependency('alsa')
 threads = dependency('threads')
 rubberband = dependency('rubberband')
+cjson = dependency('libcjson')
 
 # sources
 uphonor_sources = [
@@ -27,10 +28,12 @@ uphonor_sources = [
   'utils.c',
   'multi_loop_functions.c',
   'holo.c',
+  'config.c',
+  'config_utils.c',
 ]
 
 # exes
-executable('uphonor', uphonor_sources, dependencies : [pipewire, sndfile, alsa, math, threads, rubberband], install : true)
+executable('uphonor', uphonor_sources, dependencies : [pipewire, sndfile, alsa, math, threads, rubberband, cjson], install : true)
 
 # examples
 # executable('midi', 'examples/midi.c', dependencies : [pipewire, alsa], install : true)

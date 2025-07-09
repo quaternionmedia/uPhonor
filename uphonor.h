@@ -167,6 +167,8 @@ void on_process(void *userdata, struct spa_io_position *position);
 #include "audio_processing_rt.h"
 #include "midi_processing.h"
 #include "buffer_manager.h"
+#include "config.h"
+#include "config_utils.h"
 
 void process_loops(struct data *data, struct spa_io_position *position, uint8_t midi_note, float volume);
 
