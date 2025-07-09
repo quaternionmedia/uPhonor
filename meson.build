@@ -30,6 +30,7 @@ uphonor_sources = [
   'holo.c',
   'config.c',
   'config_utils.c',
+  'config_file_loader.c',
 ]
 
 # exes

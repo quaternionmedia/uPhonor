@@ -98,4 +98,23 @@ bool config_get_config_dir(char *buffer, size_t buffer_size);
  */
 bool config_generate_backup_filename(char *buffer, size_t buffer_size);
 
+/* Audio file loading functions */
+
+/**
+ * Load an audio file into a memory loop buffer
+ * @param loop Pointer to the memory loop structure
+ * @param filename Path to the audio file to load
+ * @param sample_rate System sample rate for validation
+ * @return true on success, false on failure
+ */
+bool load_audio_file_into_loop(struct memory_loop *loop, const char *filename, uint32_t sample_rate);
+
+/**
+ * Load all audio files referenced in the configuration
+ * This should be called after config_load_state to actually load the audio data
+ * @param data Pointer to the main data structure
+ * @return Number of files successfully loaded, or -1 on error
+ */
+int config_load_audio_files(struct data *data);
+
 #endif /* CONFIG_H */

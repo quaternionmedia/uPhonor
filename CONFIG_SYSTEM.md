@@ -1,13 +1,27 @@
 # uPhonor Configuration System
 
-The uPhonor configuration system allows you to save and restore the complete state of your audio looping session, including all recorded loops, their playback states, volume levels, sync settings, and global parameters.
+The uPhonor configuration system allows you to save and restore the state of your audio looping session, including loop metadata, playback states, volume levels, sync settings, and global parameters.
+
+## Important Note: Audio Data vs Configuration
+
+**The configuration system saves settings and metadata, NOT the actual recorded audio data.**
+
+- ✅ **Saves**: Volume levels, sync settings, loop states, filenames, playback positions
+- ❌ **Does NOT save**: Actual recorded audio content in the loop buffers
+
+This means when you load a configuration:
+1. All your settings will be restored (volumes, sync mode, etc.)
+2. Loop metadata will be loaded (which notes were used, their settings)
+3. But you'll need to record new audio content to actually hear the loops
+
+This design keeps configuration files small and fast to load/save.
 
 ## Features
 
-- **Complete State Persistence**: Save all loop states, volumes, sync settings, and global parameters
+- **Complete Settings Persistence**: Save all loop metadata, volumes, sync settings, and global parameters
 - **JSON Format**: Human-readable configuration files that can be manually edited if needed
 - **Automatic Backup**: Creates backups before loading new configurations
-- **Active Loops Only**: Option to save only loops with recorded content
+- **Active Loops Only**: Option to save only loops with recorded content metadata
 - **Validation**: Validates configuration files before loading
 - **Command Line Interface**: Easy-to-use CLI commands for session management
 

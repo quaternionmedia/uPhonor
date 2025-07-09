@@ -1,6 +1,7 @@
 #include "config.h"
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 /* High-level configuration management functions for integration with the main application */
 
@@ -103,7 +104,24 @@ int load_session(struct data *data, const char *session_name)
   config_result_t result = config_load_state(data, filename);
   if (result == CONFIG_SUCCESS)
   {
-    printf("Session loaded successfully!\n");
+    printf("Session configuration loaded successfully!\n");
+
+    /* Now load the actual audio files */
+    printf("\nLoading audio files...\n");
+    int audio_files_loaded = config_load_audio_files(data);
+
+    if (audio_files_loaded > 0)
+    {
+      printf("Successfully loaded %d audio files!\n", audio_files_loaded);
+    }
+    else if (audio_files_loaded == 0)
+    {
+      printf("No audio files were loaded. Configuration contains metadata only.\n");
+    }
+    else
+    {
+      printf("Error occurred while loading audio files.\n");
+    }
 
     /* Print summary of loaded state */
     printf("\nLoaded session summary:\n");
@@ -118,21 +136,29 @@ int load_session(struct data *data, const char *session_name)
       printf("- Pulse loop: Note %d\n", data->pulse_loop_note);
     }
 
-    int active_loops = 0;
-    int playing_loops = 0;
+    int configured_loops = 0;
+    int ready_loops = 0;
     for (int i = 0; i < 128; i++)
     {
-      if (data->memory_loops[i].loop_ready)
+      if (data->memory_loops[i].recorded_frames > 0 ||
+          strlen(data->memory_loops[i].loop_filename) > 0)
       {
-        active_loops++;
-        if (data->memory_loops[i].is_playing)
+        configured_loops++;
+        if (data->memory_loops[i].loop_ready)
         {
-          playing_loops++;
+          ready_loops++;
         }
       }
     }
-    printf("- Active loops: %d\n", active_loops);
-    printf("- Playing loops: %d\n", playing_loops);
+    printf("- Configured loop slots: %d\n", configured_loops);
+    printf("- Ready loops with audio: %d\n", ready_loops);
+
+    if (configured_loops > ready_loops)
+    {
+      printf("\nNote: %d loop slots were configured but could not load audio data.\n",
+             configured_loops - ready_loops);
+      printf("Check that the audio files exist in the 'recordings' directory.\n");
+    }
 
     return 0;
   }

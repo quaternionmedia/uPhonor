@@ -324,18 +324,21 @@ static config_result_t parse_memory_loops_json(struct data *data, cJSON *loops_a
       loop->sample_rate = (uint32_t)item->valuedouble;
     }
 
-    /* Parse boolean flags */
+    /* Parse boolean flags - be careful about setting playback states */
     if ((item = cJSON_GetObjectItemCaseSensitive(loop_json, "loop_ready")) && cJSON_IsBool(item))
     {
-      loop->loop_ready = cJSON_IsTrue(item);
+      /* Only mark as ready if we have recorded frames - audio data is separate from config */
+      loop->loop_ready = cJSON_IsTrue(item) && loop->recorded_frames > 0;
     }
     if ((item = cJSON_GetObjectItemCaseSensitive(loop_json, "recording_to_memory")) && cJSON_IsBool(item))
     {
-      loop->recording_to_memory = cJSON_IsTrue(item);
+      /* Never restore recording state - always start fresh */
+      loop->recording_to_memory = false;
     }
     if ((item = cJSON_GetObjectItemCaseSensitive(loop_json, "is_playing")) && cJSON_IsBool(item))
     {
-      loop->is_playing = cJSON_IsTrue(item);
+      /* Only set playing if loop is actually ready with data */
+      loop->is_playing = cJSON_IsTrue(item) && loop->loop_ready;
     }
     if ((item = cJSON_GetObjectItemCaseSensitive(loop_json, "pending_record")) && cJSON_IsBool(item))
     {
@@ -343,7 +346,8 @@ static config_result_t parse_memory_loops_json(struct data *data, cJSON *loops_a
     }
     if ((item = cJSON_GetObjectItemCaseSensitive(loop_json, "pending_stop")) && cJSON_IsBool(item))
     {
-      loop->pending_stop = cJSON_IsTrue(item);
+      /* Clear pending stops - they don't make sense after loading */
+      loop->pending_stop = false;
     }
     if ((item = cJSON_GetObjectItemCaseSensitive(loop_json, "pending_start")) && cJSON_IsBool(item))
     {
