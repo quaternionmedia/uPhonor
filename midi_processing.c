@@ -33,6 +33,18 @@ void check_theoretical_pulse_reset(struct data *data)
     pw_log_info("Theoretical pulse reset detected: position %u -> %u",
                 data->previous_pulse_position, current_pulse_position);
 
+    // if debug log
+    if (pw_log_level >= SPA_LOG_LEVEL_DEBUG)
+    {
+      for (int i = 0; i < 127; i++)
+      {
+        if (data->memory_loops[i].is_playing)
+        {
+          pw_log_debug("Loop %d is currently playing", i);
+        }
+      }
+    }
+
     // Clear waiting for pulse reset
     data->waiting_for_pulse_reset = false;
 
