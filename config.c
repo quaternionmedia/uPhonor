@@ -256,9 +256,31 @@ static config_result_t parse_memory_loops_json(struct data *data, cJSON *loops_a
   if (!cJSON_IsArray(loops_array))
     return CONFIG_ERROR_INVALID_DATA;
 
-  /* First, reset all loops to default state */
+  /* First pass: collect which loops are being restored from config */
+  bool loops_to_restore[128] = {false};
+  cJSON *loop_item = NULL;
+  cJSON_ArrayForEach(loop_item, loops_array)
+  {
+    if (!cJSON_IsObject(loop_item))
+      continue;
+
+    cJSON *midi_note_item = cJSON_GetObjectItemCaseSensitive(loop_item, "midi_note");
+    if (!cJSON_IsNumber(midi_note_item))
+      continue;
+
+    int midi_note = (int)midi_note_item->valuedouble;
+    if (midi_note >= 0 && midi_note < 128)
+    {
+      loops_to_restore[midi_note] = true;
+    }
+  }
+
+  /* Second pass: reset only loops that are NOT being restored */
   for (int i = 0; i < 128; i++)
   {
+    if (loops_to_restore[i])
+      continue; /* Skip loops that will be restored from config */
+
     struct memory_loop *loop = &data->memory_loops[i];
     if (loop->buffer)
     {
@@ -324,11 +346,11 @@ static config_result_t parse_memory_loops_json(struct data *data, cJSON *loops_a
       loop->sample_rate = (uint32_t)item->valuedouble;
     }
 
-    /* Parse boolean flags - be careful about setting playback states */
+    /* Parse boolean flags - store intended values, validation happens after audio loading */
     if ((item = cJSON_GetObjectItemCaseSensitive(loop_json, "loop_ready")) && cJSON_IsBool(item))
     {
-      /* Only mark as ready if we have recorded frames - audio data is separate from config */
-      loop->loop_ready = cJSON_IsTrue(item) && loop->recorded_frames > 0;
+      /* Store the intended ready state - will be validated after audio files are loaded */
+      loop->loop_ready = cJSON_IsTrue(item);
     }
     if ((item = cJSON_GetObjectItemCaseSensitive(loop_json, "recording_to_memory")) && cJSON_IsBool(item))
     {
@@ -337,8 +359,8 @@ static config_result_t parse_memory_loops_json(struct data *data, cJSON *loops_a
     }
     if ((item = cJSON_GetObjectItemCaseSensitive(loop_json, "is_playing")) && cJSON_IsBool(item))
     {
-      /* Only set playing if loop is actually ready with data */
-      loop->is_playing = cJSON_IsTrue(item) && loop->loop_ready;
+      /* Store the intended playing state - will be validated after audio files are loaded */
+      loop->is_playing = cJSON_IsTrue(item);
     }
     if ((item = cJSON_GetObjectItemCaseSensitive(loop_json, "pending_record")) && cJSON_IsBool(item))
     {

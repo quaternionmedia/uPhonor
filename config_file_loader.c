@@ -86,12 +86,12 @@ bool load_audio_file_into_loop(struct memory_loop *loop, const char *filename, u
     return false;
   }
 
-  /* Update loop state */
+  /* Update loop state - preserve current_state that was set during JSON parsing */
   loop->recorded_frames = (uint32_t)frames_read;
   loop->playback_position = 0;
   loop->loop_ready = true;
   loop->recording_to_memory = false;
-  loop->current_state = LOOP_STATE_IDLE; /* Start idle, user can trigger playback */
+  /* Don't change current_state - it should preserve the state from JSON parsing */
 
   printf("Loaded audio file: %s (%u frames, %.2f seconds)\n",
          filename, loop->recorded_frames,
@@ -146,6 +146,52 @@ int config_load_audio_files(struct data *data)
   }
 
   printf("Audio loading complete: %d files loaded, %d failed\n", files_loaded, files_failed);
+
+  /* Validate and restore loop states after audio loading */
+  for (int i = 0; i < 128; i++)
+  {
+    struct memory_loop *loop = &data->memory_loops[i];
+    
+    /* If loop was supposed to have audio but loading failed, reset to safe state */
+    if (strlen(loop->loop_filename) > 0 && loop->recorded_frames == 0)
+    {
+      printf("Loop %d: Audio file '%s' failed to load, resetting to IDLE\n", i, loop->loop_filename);
+      loop->loop_ready = false;
+      loop->is_playing = false;
+      loop->current_state = LOOP_STATE_IDLE;
+      /* Clear the filename since the file couldn't be loaded */
+      memset(loop->loop_filename, 0, sizeof(loop->loop_filename));
+    }
+    /* If loop has audio data, ensure flags are consistent with current_state */
+    else if (loop->recorded_frames > 0)
+    {
+      loop->loop_ready = true;
+      
+      /* Set is_playing flag based on current_state */
+      if (loop->current_state == LOOP_STATE_PLAYING)
+      {
+        loop->is_playing = true;
+        printf("Loop %d: Restored to PLAYING state\n", i);
+      }
+      else if (loop->current_state == LOOP_STATE_STOPPED)
+      {
+        loop->is_playing = false;
+        printf("Loop %d: Restored to STOPPED state\n", i);
+      }
+      else if (loop->current_state == LOOP_STATE_IDLE)
+      {
+        loop->is_playing = false;
+        printf("Loop %d: Restored to IDLE state\n", i);
+      }
+      /* RECORDING state should not be restored - always start fresh */
+      else if (loop->current_state == LOOP_STATE_RECORDING)
+      {
+        loop->current_state = LOOP_STATE_IDLE;
+        loop->is_playing = false;
+        printf("Loop %d: Recording state not restored, set to IDLE\n", i);
+      }
+    }
+  }
 
   return files_loaded;
 }
