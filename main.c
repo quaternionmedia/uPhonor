@@ -1,5 +1,5 @@
 #include "uphonor.h"
-#include "cli_rubberband.c"
+#include "cli.c"
 #include "pipe.c"
 #include "process.c"
 #include "audio_processing_rt.h"
