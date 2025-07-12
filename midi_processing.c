@@ -9,6 +9,7 @@
 #define SYNC_MODE_CC_NUMBER 78             /* MIDI CC 78 for sync mode on/off */
 #define SYNC_CUTOFF_CC_NUMBER 79           /* MIDI CC 79 for sync playback cutoff point (0-100% of pulse duration) */
 #define SYNC_RECORDING_CUTOFF_CC_NUMBER 80 /* MIDI CC 80 for sync recording cutoff point (0-100% of pulse duration) */
+#define SAVE_CONFIG_CC_NUMBER 81           /* MIDI CC 81 for saving configuration (trigger on any value > 0) */
 
 /* Update the pulse timeline based on current sample frame */
 void update_pulse_timeline(struct data *data, uint64_t current_frame)
@@ -902,6 +903,40 @@ void handle_control_change(struct data *data, uint8_t channel, uint8_t controlle
 
     pw_log_info("MIDI CC%d: Sync recording cutoff set to %.1f%% (value=%d)",
                 controller, recording_cutoff_percentage * 100.0f, value);
+  }
+  break;
+
+  case SAVE_CONFIG_CC_NUMBER:
+  {
+    /* Save current configuration when any value > 0 is received (trigger mode) */
+    if (value > 0)
+    {
+      /* Generate timestamp-based filename */
+      time_t now = time(NULL);
+      struct tm *tm_info = localtime(&now);
+      char filename[256];
+
+      snprintf(filename, sizeof(filename), "uphonor_session_%04d%02d%02d_%02d%02d%02d.json",
+               tm_info->tm_year + 1900,
+               tm_info->tm_mon + 1,
+               tm_info->tm_mday,
+               tm_info->tm_hour,
+               tm_info->tm_min,
+               tm_info->tm_sec);
+
+      /* Save the configuration */
+      config_result_t result = config_save_state(data, filename);
+
+      if (result == CONFIG_SUCCESS)
+      {
+        pw_log_info("MIDI CC%d: Configuration saved to %s", controller, filename);
+      }
+      else
+      {
+        pw_log_error("MIDI CC%d: Failed to save configuration: %s",
+                     controller, config_get_error_message(result));
+      }
+    }
   }
   break;
 

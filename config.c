@@ -379,8 +379,8 @@ config_result_t config_save_state(struct data *data, const char *filename)
   }
   cJSON_AddItemToObject(root, "global_state", global_state);
 
-  /* Add memory loops */
-  cJSON *memory_loops = create_memory_loops_json(data, false);
+  /* Add memory loops (active only - exclude IDLE loops) */
+  cJSON *memory_loops = create_memory_loops_json(data, true);
   if (!memory_loops)
   {
     cJSON_Delete(root);
