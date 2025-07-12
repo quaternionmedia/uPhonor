@@ -151,7 +151,7 @@ int config_load_audio_files(struct data *data)
   for (int i = 0; i < 128; i++)
   {
     struct memory_loop *loop = &data->memory_loops[i];
-    
+
     /* If loop was supposed to have audio but loading failed, reset to safe state */
     if (strlen(loop->loop_filename) > 0 && loop->recorded_frames == 0)
     {
@@ -166,7 +166,7 @@ int config_load_audio_files(struct data *data)
     else if (loop->recorded_frames > 0)
     {
       loop->loop_ready = true;
-      
+
       /* Set is_playing flag based on current_state */
       if (loop->current_state == LOOP_STATE_PLAYING)
       {
