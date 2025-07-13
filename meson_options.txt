@@ -1,0 +1,12 @@
+option('python_bindings', type : 'boolean', value : true,
+       description : 'Build Python CFFI bindings')
+
+option('python_package_manager', type : 'combo', 
+       choices : ['auto', 'pdm', 'uv', 'pip'], value : 'auto',
+       description : 'Python package manager to use (auto-detect by default)')
+
+option('install_python_deps', type : 'boolean', value : false,
+       description : 'Automatically install Python dependencies')
+
+option('run_python_tests', type : 'boolean', value : false,
+       description : 'Run Python tests after building')
