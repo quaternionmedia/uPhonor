@@ -45,6 +45,21 @@ def check_uv_installed():
         return False
 
 
+def check_pdm_installed():
+    """Check if PDM is installed"""
+    try:
+        result = subprocess.run(
+            ["pdm", "--version"], capture_output=True, text=True, check=True
+        )
+        print(f"✓ PDM found: {result.stdout.strip()}")
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("❌ PDM not found. Please install PDM first:")
+        print("   curl -sSL https://pdm.fming.dev/install-pdm.py | python3 -")
+        print("   Or visit: https://pdm.fming.dev/latest/")
+        return False
+
+
 def check_dependencies():
     """Check if required system dependencies are available"""
     print("Checking system dependencies...")
@@ -66,27 +81,48 @@ def check_dependencies():
     return True
 
 
-def setup_uv_project():
-    """Setup uv project and install dependencies"""
-    print("Setting up uv project...")
+def setup_project():
+    """Setup project with PDM or uv"""
+    print("Setting up project...")
 
-    # Initialize uv project (this will read pyproject.toml)
-    if not run_command("uv sync"):
-        print("Failed to sync uv project")
+    # Try PDM first, then fall back to uv
+    if check_pdm_installed():
+        print("Using PDM for project management...")
+        if not run_command("pdm install"):
+            print("Failed to install dependencies with PDM")
+            return False
+        print("✓ PDM project setup complete")
+        return True
+    elif check_uv_installed():
+        print("Using uv for project management...")
+        if not run_command("uv sync"):
+            print("Failed to sync uv project")
+            return False
+        print("✓ uv project synced")
+        return True
+    else:
+        print("❌ Neither PDM nor uv found. Please install one of them.")
         return False
-
-    print("✓ uv project synced")
-    return True
 
 
 def build_cffi_extension():
     """Build the CFFI extension"""
     print("Building CFFI extension...")
 
-    # Run the CFFI builder
-    if not run_command("uv run python build_cffi.py"):
-        print("Failed to build CFFI extension")
-        return False
+    # Try PDM first, then fall back to uv
+    if check_pdm_installed():
+        if not run_command("pdm run python build_cffi.py"):
+            print("Failed to build CFFI extension with PDM")
+            return False
+    elif check_uv_installed():
+        if not run_command("uv run python build_cffi.py"):
+            print("Failed to build CFFI extension with uv")
+            return False
+    else:
+        # Fall back to direct python execution
+        if not run_command("python build_cffi.py"):
+            print("Failed to build CFFI extension")
+            return False
 
     print("✓ CFFI extension built successfully")
     return True
@@ -97,15 +133,18 @@ def test_import():
     print("Testing import...")
 
     try:
-        # Try to import the built extension using uv run
+        # Determine which runner to use
+        runner_cmd = []
+        if check_pdm_installed():
+            runner_cmd = ["pdm", "run", "python"]
+        elif check_uv_installed():
+            runner_cmd = ["uv", "run", "python"]
+        else:
+            runner_cmd = ["python"]
+
+        # Try to import the built extension
         result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-c",
-                "import _uphonor_cffi; print('CFFI extension OK')",
-            ],
+            runner_cmd + ["-c", "import _uphonor_cffi; print('CFFI extension OK')"],
             capture_output=True,
             text=True,
             check=True,
@@ -114,17 +153,16 @@ def test_import():
 
         # Try to import the Python wrapper
         result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-c",
-                "import uphonor_python; print('Python wrapper OK')",
-            ],
+            runner_cmd
+            + ["-c", "import uphonor.uphonor_python; print('Python wrapper OK')"],
             capture_output=True,
             text=True,
             check=True,
         )
+        print("✓ Python wrapper imports successfully")
+
+        return True
+    except subprocess.CalledProcessError as e:
         print("✓ Python wrapper imports successfully")
 
         return True
@@ -290,7 +328,7 @@ MIT License - see LICENSE file for details.
 
 def main():
     """Main build process"""
-    print("uPhonor Python Bindings Build Script (uv)")
+    print("uPhonor Python Bindings Build Script (PDM/uv)")
     print("=" * 40)
 
     # Change to script directory
@@ -298,9 +336,12 @@ def main():
     os.chdir(script_dir)
 
     steps = [
-        ("Checking uv installation", check_uv_installed),
+        (
+            "Checking package managers",
+            lambda: check_pdm_installed() or check_uv_installed(),
+        ),
         ("Checking system dependencies", check_dependencies),
-        ("Setting up uv project", setup_uv_project),
+        ("Setting up project", setup_project),
         ("Building CFFI extension", build_cffi_extension),
         ("Testing import", test_import),
         ("Creating package info", create_package_info),
@@ -316,10 +357,16 @@ def main():
     print("\n" + "=" * 40)
     print("✓ Build completed successfully!")
     print("\nNext steps:")
-    print("1. Run 'uv run python examples.py' to test the bindings")
-    print("2. Run 'uv run python test_bindings.py' to run tests")
-    print("3. Run 'uv pip install -e .' to install in development mode")
-    print("4. Import with 'from uphonor_python import UPhonor'")
+    print(
+        "1. Run 'pdm run python examples.py' or 'uv run python examples.py' to test the bindings"
+    )
+    print(
+        "2. Run 'pdm run python test_bindings.py' or 'uv run python test_bindings.py' to run tests"
+    )
+    print(
+        "3. Run 'pdm install -e .' or 'uv pip install -e .' to install in development mode"
+    )
+    print("4. Import with 'from uphonor import UPhonor'")
 
     return 0
 

@@ -1,18 +1,33 @@
-# Makefile for uPhonor Python CFFI bindings with uv
+# Makefile for uPhonor Python CFFI bindings with PDM/uv
 
-.PHONY: all build clean test install install-dev deps check help uv-install
+.PHONY: all build clean test install install-dev deps check help pdm-install uv-install
 
 # Default target
 all: build
+
+# Install PDM if not present
+pdm-install:
+	@echo "Checking for PDM..."
+	@which pdm >/dev/null 2>&1 || (echo "Installing PDM..." && curl -sSL https://pdm.fming.dev/install-pdm.py | python3 -)
 
 # Install uv if not present
 uv-install:
 	@echo "Checking for uv..."
 	@which uv >/dev/null 2>&1 || (echo "Installing uv..." && curl -LsSf https://astral.sh/uv/install.sh | sh)
 
-# Build the CFFI extension
-build: uv-install
-	@echo "Building uPhonor Python CFFI bindings with uv..."
+# Build the CFFI extension (tries PDM first, then uv)
+build:
+	@echo "Building uPhonor Python CFFI bindings with PDM/uv..."
+	@which pdm >/dev/null 2>&1 && make pdm-build || make uv-build
+
+# Build with PDM
+pdm-build: pdm-install
+	@echo "Building with PDM..."
+	pdm run python build.py
+
+# Build with uv
+uv-build: uv-install
+	@echo "Building with uv..."
 	uv run python build.py
 
 # Clean build artifacts
@@ -40,38 +55,38 @@ deps-fedora:
 	sudo dnf install -y pipewire-devel libsndfile-devel alsa-lib-devel \
 		rubberband-devel libcjson-devel pkgconfig python3-devel
 
-# Setup uv project and sync dependencies
-deps-python: uv-install
-	@echo "Setting up uv project and syncing dependencies..."
-	uv sync
+# Setup project dependencies (tries PDM first, then uv)
+deps-python:
+	@echo "Setting up project dependencies..."
+	@which pdm >/dev/null 2>&1 && (echo "Using PDM..." && pdm install) || (echo "Using uv..." && make uv-install && uv sync)
 
 # Install all dependencies (Ubuntu/Debian)
 deps: deps-ubuntu deps-python
 
-# Run tests
+# Run tests (tries PDM first, then uv)
 test: build
-	@echo "Running tests with uv..."
-	uv run python test_bindings.py
+	@echo "Running tests..."
+	@which pdm >/dev/null 2>&1 && pdm run python test_bindings.py || uv run python test_bindings.py
 
-# Run examples
+# Run examples (tries PDM first, then uv)
 examples: build
-	@echo "Running examples with uv..."
-	uv run python examples.py
+	@echo "Running examples..."
+	@which pdm >/dev/null 2>&1 && pdm run python examples.py || uv run python examples.py
 
-# Run integration test
+# Run integration test (tries PDM first, then uv)
 integration: build
-	@echo "Running integration test with uv..."
-	uv run python holophono_integration.py test
+	@echo "Running integration test..."
+	@which pdm >/dev/null 2>&1 && pdm run python holophono_integration.py test || uv run python holophono_integration.py test
 
-# Install in development mode
+# Install in development mode (tries PDM first, then uv)
 install-dev: build
-	@echo "Installing in development mode with uv..."
-	uv pip install -e .
+	@echo "Installing in development mode..."
+	@which pdm >/dev/null 2>&1 && pdm install -e . || uv pip install -e .
 
-# Install normally
+# Install normally (tries PDM first, then uv)
 install: build
-	@echo "Installing uPhonor Python bindings with uv..."
-	uv pip install .
+	@echo "Installing uPhonor Python bindings..."
+	@which pdm >/dev/null 2>&1 && pdm install . || uv pip install .
 
 # Check if dependencies are available
 check: uv-install

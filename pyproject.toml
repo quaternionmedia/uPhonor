@@ -1,6 +1,5 @@
 [project]
 name = "uphonor"
-version = "0.1.0"
 description = "Python CFFI bindings for uPhonor real-time audio looping system"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -26,6 +25,7 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio",
     "Topic :: Multimedia :: Sound/Audio :: MIDI",
 ]
+dynamic = ["version"]
 
 [project.optional-dependencies]
 dev = [
@@ -39,7 +39,7 @@ examples = [
 ]
 
 [project.scripts]
-uphonor-python = "uphonor_python:main"
+uphonor-python = "uphonor.main:main"
 uphonor-examples = "examples:main"
 uphonor-integration = "holophono_integration:main"
 
@@ -51,19 +51,26 @@ Issues = "https://github.com/quaternionmedia/uPhonor/issues"
 
 [build-system]
 requires = [
+    "pdm-backend",
     "cffi>=1.14.0",
-    "setuptools>=45.0.0",
-    "wheel>=0.35.0",
 ]
-build-backend = "setuptools.build_meta"
+build-backend = "pdm.backend"
 
-[tool.setuptools.packages.find]
-include = ["uphonor*"]
+[tool.pdm]
+version = {source = "file", path = "uphonor/_version.py"}
+includes = ["uphonor", "*.py", "*.h", "*.c"]
 
-[tool.setuptools.package-data]
-uphonor = ["*.h", "*.c"]
+[tool.pdm.build]
+# Custom build hook for CFFI
+includes = ["uphonor/**/*.py", "*.py", "*.h", "*.c"]
+excludes = [
+    "**/.git/**",
+    "**/__pycache__/**", 
+    "**/build/**",
+    "**/.pytest_cache/**",
+]
 
-# CFFI build configuration
+# CFFI build configuration  
 [tool.cffi]
 source_dir = "."
 include_dirs = ["."]
