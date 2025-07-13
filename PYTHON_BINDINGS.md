@@ -24,24 +24,38 @@ sudo dnf install pipewire-devel libsndfile-devel alsa-lib-devel rubberband-devel
 
 ## Building
 
-1. Install Python dependencies:
+1. Install uv package manager:
 ```bash
-pip install cffi setuptools wheel
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-2. Build the extension:
+2. Install system dependencies:
 ```bash
-python build.py
+# Ubuntu/Debian
+sudo apt install libpipewire-0.3-dev libsndfile1-dev libasound2-dev librubberband-dev libcjson-dev
+
+# Fedora  
+sudo dnf install pipewire-devel libsndfile-devel alsa-lib-devel rubberband-devel libcjson-devel
 ```
 
-3. Test the bindings:
+3. Build the extension:
 ```bash
-python examples.py
+uv run python build.py
+# Or use make: make build
+```
+
+4. Test the bindings:
+```bash
+uv run python examples.py
+# Or use make: make examples
 ```
 
 ## Usage
 
 ```python
+# Simple usage with uv
+# uv run python -c "from uphonor_python import UPhonor, uphonor_session; ..."
+
 from uphonor_python import UPhonor, uphonor_session
 
 # Simple usage with context manager

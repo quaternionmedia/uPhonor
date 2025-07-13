@@ -57,10 +57,23 @@ with uphonor_session() as uphonor:
 
 ```sh
 cd uPhonor
-make deps        # Install system dependencies (Ubuntu/Debian)
-make build       # Build the CFFI extension
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install system dependencies (Ubuntu/Debian)
+make deps-ubuntu
+
+# Build and test
+make build       # Build the CFFI extension  
 make test        # Run tests
 make examples    # See usage examples
+```
+
+For other package managers:
+```sh
+# Traditional pip workflow
+pip install cffi
+python build.py
 ```
 
 See [PYTHON_BINDINGS.md](PYTHON_BINDINGS.md) for detailed documentation.

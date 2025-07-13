@@ -1,10 +1,10 @@
-# Python requirements for uPhonor CFFI bindings
-cffi>=1.14.0
-setuptools>=45.0.0
-wheel>=0.35.0
+# This file is kept for compatibility, but uv uses pyproject.toml
+# To install dependencies with uv: uv sync
+# To install in other environments: pip install -r requirements.txt
 
-# Optional development dependencies
-# Uncomment for development
+cffi>=1.14.0
+# Development dependencies (install with: uv sync --group dev)
 # black>=22.0.0
-# mypy>=0.900
+# mypy>=0.900 
 # pytest>=6.0.0
+# ruff>=0.1.0
