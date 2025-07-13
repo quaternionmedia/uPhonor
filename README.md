@@ -26,6 +26,45 @@ uphonor [<input_file>] [volume]
 
 Where `<input_file>` is the path to the audio file you want to play, and `[volume]` is an optional volume level (default is 1.0).
 
+## Python Bindings
+
+uPhonor now includes Python CFFI bindings for integration with Python applications. This allows you to control uPhonor from Python scripts and integrate it with other Python audio tools.
+
+### Quick Start with Python Bindings
+
+```python
+from uphonor_python import uphonor_session
+
+# Use context manager for automatic cleanup
+with uphonor_session() as uphonor:
+    # Start the audio system
+    uphonor.start()
+    
+    # Set audio parameters
+    uphonor.set_volume(0.8)
+    uphonor.set_playback_speed(1.2)
+    uphonor.set_pitch_shift(3.0)  # 3 semitones up
+    
+    # Handle MIDI input
+    uphonor.handle_note_on(0, 60, 100)  # Start loop on middle C
+    uphonor.handle_note_off(0, 60, 0)   # Stop loop
+    
+    # Save session
+    uphonor.save_state("my_session.json")
+```
+
+### Building Python Bindings
+
+```sh
+cd uPhonor
+make deps        # Install system dependencies (Ubuntu/Debian)
+make build       # Build the CFFI extension
+make test        # Run tests
+make examples    # See usage examples
+```
+
+See [PYTHON_BINDINGS.md](PYTHON_BINDINGS.md) for detailed documentation.
+
 ## Development
 ### Prerequisites
 
