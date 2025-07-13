@@ -38,16 +38,16 @@ endif
 if preferred_package_manager == 'pdm'
   pdm_prog = find_program('pdm', required: true)
   python_deps_cmd = [pdm_prog, 'install']
-  python_run_prefix = [pdm_prog, 'run', 'python']
+  python_run_prefix = [pdm_prog.full_path(), 'run', 'python']
   message('Using PDM for Python package management')
 elif preferred_package_manager == 'uv' 
   uv_prog = find_program('uv', required: true)
   python_deps_cmd = [uv_prog, 'sync']
-  python_run_prefix = [uv_prog, 'run', 'python']
+  python_run_prefix = [uv_prog.full_path(), 'run', 'python']
   message('Using uv for Python package management')
 else
   python_deps_cmd = [python, '-m', 'pip', 'install', '-e', '.']
-  python_run_prefix = [python]
+  python_run_prefix = [python.full_path()]
   warning('Using pip directly - consider installing PDM or uv for better dependency management')
 endif
 
@@ -83,25 +83,9 @@ executable('uphonor', uphonor_sources, dependencies : [pipewire, sndfile, alsa, 
 # Python CFFI bindings
 if build_python_bindings and cffi_available
   message('Building Python CFFI bindings with ' + preferred_package_manager)
-
-  # Configure wrapper script for running commands in source directory  
-  wrapper_script = configure_file(
-    input: 'scripts/run_in_source.sh',
-    output: 'run_in_source.sh',
-    configuration: {'SOURCE_ROOT': meson.project_source_root()}
-  )
   
-  # Install Python dependencies
-  if preferred_package_manager == 'pdm'
-    python_deps_cmd = [pdm_prog, 'install']
-    python_run_prefix = [pdm_prog, 'run', 'python']
-  elif preferred_package_manager == 'uv'
-    python_deps_cmd = [uv_prog, 'sync']
-    python_run_prefix = [uv_prog, 'run', 'python']
-  else
-    python_deps_cmd = [python, '-m', 'pip', 'install', '-e', '.']
-    python_run_prefix = [python]
-  endif
+  # Python dependencies are already set up above
+  # The commands use the python_run_prefix defined above
 endif
 
 # examples
@@ -125,7 +109,7 @@ if cffi_available
   cffi_build_target = custom_target('cffi-build',
     output: 'cffi-built',
     input: [files('build_cffi.py'), files('build.py')],
-    command: [wrapper_script] + python_run_prefix + ['build.py'],
+    command: ['sh', '-c', 'cd @0@ && @1@'.format(meson.project_source_root(), ' '.join(python_run_prefix + ['build.py']))],
     depends: python_deps_target,
     console: true,
     build_always_stale: true,
@@ -136,7 +120,7 @@ if cffi_available
   test_target = custom_target('python-test',
     output: 'python-tests-run',
     input: files('test_bindings.py'),
-    command: [wrapper_script] + python_run_prefix + ['test_bindings.py'],
+    command: ['sh', '-c', 'cd @0@ && @1@'.format(meson.project_source_root(), ' '.join(python_run_prefix + ['test_bindings.py']))],
     depends: cffi_build_target,
     console: true,
     build_always_stale: true,
@@ -147,7 +131,7 @@ if cffi_available
   examples_target = custom_target('python-examples',
     output: 'python-examples-run',
     input: files('examples.py'),
-    command: [wrapper_script] + python_run_prefix + ['examples.py'],
+    command: ['sh', '-c', 'cd @0@ && @1@'.format(meson.project_source_root(), ' '.join(python_run_prefix + ['examples.py']))],
     depends: cffi_build_target,
     console: true,
     build_always_stale: true,
@@ -158,7 +142,7 @@ if cffi_available
   integration_target = custom_target('python-integration',
     output: 'python-integration-run',
     input: files('holophono_integration.py'),
-    command: [wrapper_script] + python_run_prefix + ['holophono_integration.py', 'test'],
+    command: ['sh', '-c', 'cd @0@ && @1@'.format(meson.project_source_root(), ' '.join(python_run_prefix + ['holophono_integration.py', 'test']))],
     depends: cffi_build_target,
     console: true,
     build_always_stale: true,
@@ -168,7 +152,7 @@ if cffi_available
   # Development install target
   install_dev_target = custom_target('python-install-dev',
     output: 'python-dev-installed',
-    command: [wrapper_script] + python_run_prefix + ['-m', 'pip', 'install', '-e', '.'],
+    command: ['sh', '-c', 'cd @0@ && @1@'.format(meson.project_source_root(), ' '.join(python_run_prefix + ['-m', 'pip', 'install', '-e', '.']))],
     depends: cffi_build_target,
     console: true,
     build_always_stale: true,
@@ -178,7 +162,7 @@ if cffi_available
   # Quality assurance targets
   black_target = custom_target('python-black',
     output: 'python-black-done',
-    command: [wrapper_script] + python_run_prefix + ['-m', 'black', '.'],
+    command: ['sh', '-c', 'cd @0@ && @1@'.format(meson.project_source_root(), ' '.join(python_run_prefix + ['-m', 'black', '.']))],
     depends: python_deps_target,
     console: true,
     build_always_stale: true,
@@ -187,7 +171,7 @@ if cffi_available
 
   ruff_target = custom_target('python-ruff',
     output: 'python-ruff-done', 
-    command: [wrapper_script] + python_run_prefix + ['-m', 'ruff', '--fix', '.'],
+    command: ['sh', '-c', 'cd @0@ && @1@'.format(meson.project_source_root(), ' '.join(python_run_prefix + ['-m', 'ruff', '--fix', '.']))],
     depends: python_deps_target,
     console: true,
     build_always_stale: true,
@@ -197,7 +181,7 @@ if cffi_available
   typecheck_target = custom_target('python-typecheck',
     output: 'python-typechecked',
     input: files('uphonor/uphonor_python.py'),
-    command: [wrapper_script] + python_run_prefix + ['-m', 'mypy', 'uphonor/uphonor_python.py'],
+    command: ['sh', '-c', 'cd @0@ && @1@'.format(meson.project_source_root(), ' '.join(python_run_prefix + ['-m', 'mypy', 'uphonor/uphonor_python.py']))],
     depends: python_deps_target,
     console: true,
     build_always_stale: true,

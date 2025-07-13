@@ -27,6 +27,11 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["uphonor*"]
+exclude = ["build*", "dist*", "*.egg-info*"]
+
 [project.optional-dependencies]
 dev = [
     "black>=22.0.0",
