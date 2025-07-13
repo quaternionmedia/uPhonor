@@ -2,7 +2,16 @@
 Python CFFI bindings for uPhonor - A real-time audio looping system
 """
 
-from ._uphonor_cffi import ffi, lib
+# Handle both standalone and package imports
+try:
+    from ._uphonor_cffi import ffi, lib
+except ImportError:
+    try:
+        from _uphonor_cffi import ffi, lib
+    except ImportError:
+        print("Error: CFFI extension not available. Run 'python build_cffi.py' first.")
+        raise
+
 import os
 import sys
 from typing import Optional, List, Dict, Any

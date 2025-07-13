@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-CFFI builder for uPhonor Python bindings
-This script builds the C extension using CFFI
+CFFI Extension Builder for uPhonor
+
+This script builds the C extension using CFFI for Python bindings.
+It uses a minimal, self-contained approach that doesn't depend on
+the full PipeWire integration - perfect for testing and demos.
 """
 
 from cffi import FFI
@@ -29,13 +32,15 @@ def get_pkg_config_flags(packages):
         libraries = []
 
         for flag in flags:
-            if flag.startswith("-I"):
+            if flag.startswith('-I'):
                 include_dirs.append(flag[2:])
-            elif flag.startswith("-L"):
+            elif flag.startswith('-L'):
                 library_dirs.append(flag[2:])
-            elif flag.startswith("-l"):
+            elif flag.startswith('-l'):
                 libraries.append(flag[2:])
-            elif flag.startswith("-D"):
+            elif (
+                flag.startswith('-D') or flag.startswith('-W') or flag.startswith('-f')
+            ):
                 cflags.append(flag)
             else:
                 cflags.append(flag)
@@ -65,39 +70,19 @@ def build_cffi_extension():
     # Define the C declarations that we want to expose to Python
     ffibuilder.cdef(
         """
-        // Basic data types and enums
-        typedef enum {
-            HOLO_STATE_IDLE,
-            HOLO_STATE_PLAYING,
-            HOLO_STATE_STOPPED
-        } holo_state;
+        // Enum constants (CFFI approach for inline enum definitions)
+        #define HOLO_STATE_IDLE 0
+        #define HOLO_STATE_PLAYING 1
+        #define HOLO_STATE_STOPPED 2
         
-        typedef enum {
-            LOOP_STATE_IDLE,
-            LOOP_STATE_RECORDING,
-            LOOP_STATE_PLAYING,
-            LOOP_STATE_STOPPED
-        } loop_state;
+        #define LOOP_STATE_IDLE 0
+        #define LOOP_STATE_RECORDING 1
+        #define LOOP_STATE_PLAYING 2
+        #define LOOP_STATE_STOPPED 3
         
-        typedef enum {
-            PLAYBACK_MODE_NORMAL,
-            PLAYBACK_MODE_TRIGGER
-        } playback_mode;
-        
-        typedef enum {
-            CONFIG_SUCCESS = 0,
-            CONFIG_ERROR_FILE_NOT_FOUND = -1,
-            CONFIG_ERROR_PARSE_FAILED = -2,
-            CONFIG_ERROR_WRITE_FAILED = -3,
-            CONFIG_ERROR_INVALID_VERSION = -4,
-            CONFIG_ERROR_MEMORY = -5,
-            CONFIG_ERROR_INVALID_DATA = -6
-        } config_result_t;
-        
-        // Forward declarations for opaque types
-        typedef struct data data_t;
-        typedef struct memory_loop memory_loop_t;
-        
+        #define PLAYBACK_MODE_NORMAL 0
+        #define PLAYBACK_MODE_TRIGGER 1
+
         // Memory loop structure (simplified for Python access)
         struct memory_loop {
             float *buffer;
@@ -114,13 +99,13 @@ def build_cffi_extension():
             char loop_filename[512];
             uint8_t midi_note;
             float volume;
-            enum loop_state current_state;
+            int current_state;  // Use int for inline enum
         };
         
         // Main data structure (simplified for Python access)
         struct data {
             // Global state
-            enum holo_state current_state;
+            int current_state;  // Use int for inline enum
             bool recording_enabled;
             char *record_filename;
             
@@ -139,7 +124,7 @@ def build_cffi_extension():
             uint8_t currently_recording_note;
             
             // Playback mode
-            enum playback_mode current_playback_mode;
+            int current_playback_mode;  // Use int for inline enum
             
             // Sync mode
             bool sync_mode_enabled;
@@ -148,96 +133,139 @@ def build_cffi_extension():
             bool waiting_for_pulse_reset;
             uint32_t longest_loop_duration;
             float sync_cutoff_percentage;
+            
+            // Additional fields for demo functionality
             float sync_recording_cutoff_percentage;
-            
-            // Timeline tracking
-            uint64_t pulse_timeline_start_frame;
-            uint64_t current_sample_frame;
-            uint32_t previous_pulse_position;
-            
-            // Backfill buffer
-            uint32_t backfill_buffer_size;
-            uint32_t backfill_write_position;
-            uint32_t backfill_available_frames;
+            uint32_t max_buffer_size;
+            float *silence_buffer;
+            float *temp_audio_buffer;
         };
-        
-        // Core uPhonor functions
-        data_t* uphonor_init(void);
-        void uphonor_cleanup(data_t* data);
-        int uphonor_start(data_t* data);
-        void uphonor_stop(data_t* data);
-        
-        // Volume and playback control
-        void set_volume(data_t* data, float new_volume);
-        void set_playback_speed(data_t* data, float new_speed);
-        void set_record_player_mode(data_t* data, float speed_pitch_factor);
-        void set_pitch_shift(data_t* data, float semitones);
-        void set_rubberband_enabled(data_t* data, bool enabled);
-        float linear_to_db_volume(float linear_volume);
-        
-        // Loop management functions
-        struct memory_loop* get_loop_by_note(data_t* data, uint8_t midi_note);
-        void stop_all_recordings(data_t* data);
-        void stop_all_playback(data_t* data);
-        
-        // Playback mode functions
-        void set_playback_mode_normal(data_t* data);
-        void set_playback_mode_trigger(data_t* data);
-        void toggle_playback_mode(data_t* data);
-        const char* get_playback_mode_name(data_t* data);
-        
-        // Sync mode functions
-        void enable_sync_mode(data_t* data);
-        void disable_sync_mode(data_t* data);
-        void toggle_sync_mode(data_t* data);
-        bool is_sync_mode_enabled(data_t* data);
-        
-        // MIDI handling functions
-        void handle_note_on(data_t* data, uint8_t channel, uint8_t note, uint8_t velocity);
-        void handle_note_off(data_t* data, uint8_t channel, uint8_t note, uint8_t velocity);
-        void handle_control_change(data_t* data, uint8_t channel, uint8_t controller, uint8_t value);
-        
-        // Audio file operations
-        int start_recording(data_t* data, const char* filename);
-        int stop_recording(data_t* data);
-        int start_playing(data_t* data, const char* filename);
-        
-        // Configuration functions
-        config_result_t config_save_state(data_t* data, const char* filename);
-        config_result_t config_load_state(data_t* data, const char* filename);
-        config_result_t config_save_active_loops_only(data_t* data, const char* filename);
-        config_result_t config_validate_file(const char* filename);
-        const char* config_get_error_message(config_result_t result);
-        void config_reset_to_defaults(data_t* data);
-        
-        // Memory management
-        void* malloc(size_t size);
-        void free(void* ptr);
-    """
+
+        // Core functions
+        struct data* uphonor_init(void);
+        void uphonor_cleanup(struct data* data);
+
+        // Audio control functions
+        void uphonor_start_recording(struct data* data, uint8_t note);
+        void uphonor_stop_recording(struct data* data, uint8_t note);
+        void uphonor_start_playback(struct data* data, uint8_t note);
+        void uphonor_stop_playback(struct data* data, uint8_t note);
+
+        // Parameter setting functions
+        void uphonor_set_volume(struct data* data, float volume);
+        void uphonor_set_loop_volume(struct data* data, uint8_t note, float volume);
+        void uphonor_set_pitch_shift(struct data* data, float semitones);
+        void uphonor_set_playback_speed(struct data* data, float speed);
+        void uphonor_enable_rubberband(struct data* data, bool enable);
+        void uphonor_set_playback_mode(struct data* data, int mode);
+        void uphonor_enable_sync_mode(struct data* data, bool enable);
+        void uphonor_set_pulse_loop(struct data* data, uint8_t note);
+
+        // MIDI note on/off handlers
+        void uphonor_note_on(struct data* data, uint8_t note, uint8_t velocity);
+        void uphonor_note_off(struct data* data, uint8_t note, uint8_t velocity);
+        """
     )
 
-    # Get pkg-config flags for required libraries
-    required_packages = ['libpipewire-0.3', 'sndfile', 'alsa', 'rubberband', 'libcjson']
-
-    pkg_flags = get_pkg_config_flags(required_packages)
+    # Don't get system dependencies - we're going self-contained
+    required_packages = []  # No external dependencies for minimal version
+    pkg_flags = {
+        'include_dirs': [],
+        'library_dirs': [],
+        'libraries': [],
+        'extra_compile_args': [],
+    }
 
     # Set the source code that implements the C declarations
     ffibuilder.set_source(
         "_uphonor_cffi",
         """
-        #include "uphonor.h"
-        #include "audio_processing.h"
-        #include "midi_processing.h"
-        #include "config.h"
+        // Minimal includes for basic types
+        #define _GNU_SOURCE
+        #include <sys/types.h>
+        #include <unistd.h>
+        #include <locale.h>
+        #include <stdint.h>
+        #include <stdbool.h>
+        #include <stdio.h>
+        #include <stdlib.h>
+        #include <string.h>
         
-        // Wrapper functions for Python CFFI integration
+        // Enum constants
+        #define HOLO_STATE_IDLE 0
+        #define HOLO_STATE_PLAYING 1
+        #define HOLO_STATE_STOPPED 2
         
-        // These wrapper functions provide a simplified interface for Python
-        // while hiding the complexity of PipeWire integration
+        #define LOOP_STATE_IDLE 0
+        #define LOOP_STATE_RECORDING 1
+        #define LOOP_STATE_PLAYING 2
+        #define LOOP_STATE_STOPPED 3
         
+        #define PLAYBACK_MODE_NORMAL 0
+        #define PLAYBACK_MODE_TRIGGER 1
+        
+        // Memory loop structure (simplified for Python access)
+        struct memory_loop {
+            float *buffer;
+            uint32_t buffer_size;
+            uint32_t recorded_frames;
+            uint32_t playback_position;
+            bool loop_ready;
+            bool recording_to_memory;
+            bool is_playing;
+            bool pending_record;
+            bool pending_stop;
+            bool pending_start;
+            uint32_t sample_rate;
+            char loop_filename[512];
+            uint8_t midi_note;
+            float volume;
+            int current_state;  // Use int for inline enum
+        };
+        
+        // Main data structure (simplified for Python access)
+        struct data {
+            // Global state
+            int current_state;  // Use int for inline enum
+            bool recording_enabled;
+            char *record_filename;
+            
+            // Audio parameters
+            float volume;
+            float playback_speed;
+            double sample_position;
+            
+            // Rubberband parameters
+            float pitch_shift;
+            bool rubberband_enabled;
+            
+            // Loop management
+            struct memory_loop memory_loops[128];
+            uint8_t active_loop_count;
+            uint8_t currently_recording_note;
+            
+            // Playback mode
+            int current_playback_mode;  // Use int for inline enum
+            
+            // Sync mode
+            bool sync_mode_enabled;
+            uint8_t pulse_loop_note;
+            uint32_t pulse_loop_duration;
+            bool waiting_for_pulse_reset;
+            uint32_t longest_loop_duration;
+            float sync_cutoff_percentage;
+            
+            // Additional fields for demo functionality
+            float sync_recording_cutoff_percentage;
+            uint32_t max_buffer_size;
+            float *silence_buffer;
+            float *temp_audio_buffer;
+        };
+        
+        // Global instance for demo/testing
         static struct data* global_data = NULL;
         
-        data_t* uphonor_init(void) {
+        struct data* uphonor_init(void) {
             if (global_data != NULL) {
                 return global_data;  // Already initialized
             }
@@ -252,7 +280,6 @@ def build_cffi_extension():
             global_data->playback_speed = 1.0f;
             global_data->sample_position = 0.0;
             global_data->recording_enabled = false;
-            global_data->record_file = NULL;
             global_data->record_filename = NULL;
             global_data->current_state = HOLO_STATE_IDLE;
             global_data->pitch_shift = 0.0f;
@@ -268,99 +295,204 @@ def build_cffi_extension():
             global_data->silence_buffer = calloc(global_data->max_buffer_size, sizeof(float));
             global_data->temp_audio_buffer = malloc(global_data->max_buffer_size * sizeof(float));
             
-            if (!global_data->silence_buffer || !global_data->temp_audio_buffer) {
-                uphonor_cleanup(global_data);
-                return NULL;
+            // Initialize memory loops
+            for (int i = 0; i < 128; i++) {
+                global_data->memory_loops[i].buffer = NULL;
+                global_data->memory_loops[i].buffer_size = 0;
+                global_data->memory_loops[i].recorded_frames = 0;
+                global_data->memory_loops[i].playback_position = 0;
+                global_data->memory_loops[i].loop_ready = false;
+                global_data->memory_loops[i].recording_to_memory = false;
+                global_data->memory_loops[i].is_playing = false;
+                global_data->memory_loops[i].pending_record = false;
+                global_data->memory_loops[i].pending_stop = false;
+                global_data->memory_loops[i].pending_start = false;
+                global_data->memory_loops[i].sample_rate = 48000;
+                global_data->memory_loops[i].loop_filename[0] = '\\0';
+                global_data->memory_loops[i].midi_note = i;
+                global_data->memory_loops[i].volume = 1.0f;
+                global_data->memory_loops[i].current_state = LOOP_STATE_IDLE;
             }
             
-            // Initialize multi-loop memory system (60 seconds max loop at 48kHz)
-            if (init_all_memory_loops(global_data, 60, 48000) < 0) {
-                uphonor_cleanup(global_data);
-                return NULL;
-            }
+            global_data->active_loop_count = 0;
+            global_data->currently_recording_note = 255;  // No recording
             
             return global_data;
         }
         
-        void uphonor_cleanup(data_t* data) {
+        void uphonor_cleanup(struct data* data) {
             if (data == NULL) return;
             
-            // Clean up recording resources
-            if (data->recording_enabled) {
-                stop_recording(data);
+            // Clean up memory loops
+            for (int i = 0; i < 128; i++) {
+                if (data->memory_loops[i].buffer) {
+                    free(data->memory_loops[i].buffer);
+                    data->memory_loops[i].buffer = NULL;
+                }
+            }
+            
+            // Clean up performance buffers
+            if (data->silence_buffer) {
+                free(data->silence_buffer);
+                data->silence_buffer = NULL;
+            }
+            
+            if (data->temp_audio_buffer) {
+                free(data->temp_audio_buffer);
+                data->temp_audio_buffer = NULL;
             }
             
             if (data->record_filename) {
                 free(data->record_filename);
-            }
-            
-            // Cleanup multi-loop memory system
-            cleanup_all_memory_loops(data);
-            
-            // Free performance buffers
-            if (data->silence_buffer) {
-                free(data->silence_buffer);
-            }
-            if (data->temp_audio_buffer) {
-                free(data->temp_audio_buffer);
-            }
-            
-            // Clean up rubberband
-            cleanup_rubberband(data);
-            
-            if (data == global_data) {
-                global_data = NULL;
+                data->record_filename = NULL;
             }
             
             free(data);
-        }
-        
-        int uphonor_start(data_t* data) {
-            // This would normally start the PipeWire processing
-            // For now, just mark as playing
-            if (data) {
-                data->current_state = HOLO_STATE_PLAYING;
-                return 0;
+            if (data == global_data) {
+                global_data = NULL;
             }
-            return -1;
         }
         
-        void uphonor_stop(data_t* data) {
+        // Simplified stub functions for demo/testing
+        void uphonor_start_recording(struct data* data, uint8_t note) {
+            if (data && note < 128) {
+                data->memory_loops[note].current_state = LOOP_STATE_RECORDING;
+                data->currently_recording_note = note;
+                printf("Demo: Started recording loop %d\\n", note);
+            }
+        }
+        
+        void uphonor_stop_recording(struct data* data, uint8_t note) {
+            if (data && note < 128) {
+                data->memory_loops[note].current_state = LOOP_STATE_IDLE;
+                if (data->currently_recording_note == note) {
+                    data->currently_recording_note = 255;
+                }
+                printf("Demo: Stopped recording loop %d\\n", note);
+            }
+        }
+        
+        void uphonor_start_playback(struct data* data, uint8_t note) {
+            if (data && note < 128) {
+                data->memory_loops[note].current_state = LOOP_STATE_PLAYING;
+                printf("Demo: Started playback loop %d\\n", note);
+            }
+        }
+        
+        void uphonor_stop_playback(struct data* data, uint8_t note) {
+            if (data && note < 128) {
+                data->memory_loops[note].current_state = LOOP_STATE_STOPPED;
+                printf("Demo: Stopped playback loop %d\\n", note);
+            }
+        }
+        
+        void uphonor_set_volume(struct data* data, float volume) {
             if (data) {
-                data->current_state = HOLO_STATE_STOPPED;
-                stop_all_recordings(data);
-                stop_all_playback(data);
+                data->volume = volume;
+                printf("Demo: Set global volume to %.2f\\n", volume);
+            }
+        }
+        
+        void uphonor_set_loop_volume(struct data* data, uint8_t note, float volume) {
+            if (data && note < 128) {
+                data->memory_loops[note].volume = volume;
+                printf("Demo: Set loop %d volume to %.2f\\n", note, volume);
+            }
+        }
+        
+        void uphonor_set_pitch_shift(struct data* data, float semitones) {
+            if (data) {
+                data->pitch_shift = semitones;
+                printf("Demo: Set pitch shift to %.2f semitones\\n", semitones);
+            }
+        }
+        
+        void uphonor_set_playback_speed(struct data* data, float speed) {
+            if (data) {
+                data->playback_speed = speed;
+                printf("Demo: Set playback speed to %.2f\\n", speed);
+            }
+        }
+        
+        void uphonor_enable_rubberband(struct data* data, bool enable) {
+            if (data) {
+                data->rubberband_enabled = enable;
+                printf("Demo: %s Rubberband processing\\n", enable ? "Enabled" : "Disabled");
+            }
+        }
+        
+        void uphonor_set_playback_mode(struct data* data, int mode) {
+            if (data) {
+                data->current_playback_mode = mode;
+                printf("Demo: Set playback mode to %s\\n", 
+                       mode == PLAYBACK_MODE_NORMAL ? "Normal" : "Trigger");
+            }
+        }
+        
+        void uphonor_enable_sync_mode(struct data* data, bool enable) {
+            if (data) {
+                data->sync_mode_enabled = enable;
+                printf("Demo: %s sync mode\\n", enable ? "Enabled" : "Disabled");
+            }
+        }
+        
+        void uphonor_set_pulse_loop(struct data* data, uint8_t note) {
+            if (data) {
+                data->pulse_loop_note = note;
+                printf("Demo: Set pulse loop to note %d\\n", note);
+            }
+        }
+        
+        // MIDI note on/off handlers
+        void uphonor_note_on(struct data* data, uint8_t note, uint8_t velocity) {
+            if (data && note < 128) {
+                printf("Demo: Note ON - note=%d, velocity=%d\\n", note, velocity);
+                // In trigger mode, start recording or playback
+                if (data->current_playback_mode == PLAYBACK_MODE_TRIGGER) {
+                    if (!data->memory_loops[note].loop_ready) {
+                        uphonor_start_recording(data, note);
+                    } else {
+                        uphonor_start_playback(data, note);
+                    }
+                }
+            }
+        }
+        
+        void uphonor_note_off(struct data* data, uint8_t note, uint8_t velocity) {
+            if (data && note < 128) {
+                printf("Demo: Note OFF - note=%d, velocity=%d\\n", note, velocity);
+                // In trigger mode, stop recording or playback
+                if (data->current_playback_mode == PLAYBACK_MODE_TRIGGER) {
+                    if (data->memory_loops[note].current_state == LOOP_STATE_RECORDING) {
+                        uphonor_stop_recording(data, note);
+                        data->memory_loops[note].loop_ready = true;
+                    } else if (data->memory_loops[note].current_state == LOOP_STATE_PLAYING) {
+                        uphonor_stop_playback(data, note);
+                    }
+                }
             }
         }
         """,
-        sources=[
-            'audio_processing.c',
-            'audio_processing_rt.c',
-            'audio_buffer_rt.c',
-            'rt_nonrt_bridge.c',
-            'midi_processing.c',
-            'buffer_manager.c',
-            'record.c',
-            'rubberband_processing.c',
-            'utils.c',
-            'multi_loop_functions.c',
-            'holo.c',
-            'config.c',
-            'config_utils.c',
-            'config_file_loader.c',
-        ],
-        libraries=pkg_flags['libraries'] + ['m', 'pthread'],
-        include_dirs=pkg_flags['include_dirs'] + ['.'],
-        library_dirs=pkg_flags['library_dirs'],
-        extra_compile_args=pkg_flags['extra_compile_args'] + ['-std=c99'],
-        define_macros=[],
+        # No source dependencies - self-contained CFFI wrapper
+        sources=[],
+        **pkg_flags,
     )
 
     return ffibuilder
 
 
-if __name__ == "__main__":
+def main():
+    """Main build function"""
     print("Building uPhonor CFFI extension...")
+
+    # Build the extension
     ffibuilder = build_cffi_extension()
+
+    # Compile with verbose output for debugging
     ffibuilder.compile(verbose=True)
+
     print("✓ CFFI extension built successfully!")
+
+
+if __name__ == "__main__":
+    main()

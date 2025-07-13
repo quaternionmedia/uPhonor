@@ -6,13 +6,24 @@ Run with: uv run python examples.py
 
 import time
 import threading
-from uphonor_python import (
-    UPhonor,
-    uphonor_session,
-    HoloState,
-    PlaybackMode,
-    ConfigResult,
-)
+
+# Handle both standalone and package imports
+try:
+    from uphonor_python import (
+        UPhonor,
+        uphonor_session,
+        HoloState,
+        PlaybackMode,
+        ConfigResult,
+    )
+except ImportError:
+    from uphonor.uphonor_python import (
+        UPhonor,
+        uphonor_session,
+        HoloState,
+        PlaybackMode,
+        ConfigResult,
+    )
 
 
 def basic_usage_example():
