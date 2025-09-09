@@ -1,0 +1,31 @@
+# Publish a release to GitHub releases when a tag is pushed
+name: 🏛 Publish release
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    name: 📦 Build package
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📰 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📲 Install compiler
+        run: sudo apt-get install -y build-essential meson pipewire
+
+      - name: 📦 Setup project
+        run: mkdir build && cd build/ && meson setup
+
+      - name: 🏗️ Build package
+        run: meson compile
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/uphonor
+          generate_release_notes: true
+          draft: true
